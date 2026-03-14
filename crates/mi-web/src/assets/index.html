@@ -240,12 +240,48 @@
   <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()">Resume</button>
   <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()">Stop</button>
 </div>
+
+<!-- System Info -->
+<div class="card" style="margin-bottom:16px">
+  <h2>System</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:24px;font-size:0.85em">
+    <div><span class="label">Platform</span> <span id="sys-platform">-</span></div>
+    <div><span class="label">CPU</span> <span id="sys-cpu">-</span></div>
+    <div><span class="label">GPU</span> <span id="sys-gpu">-</span></div>
+    <div><span class="label">Memory</span> <span id="sys-mem">-</span></div>
+    <div><span class="label">Threads</span> <span id="sys-threads">-</span></div>
+    <div><span class="label">GPU Mining</span> <span id="sys-gpu-status">-</span></div>
+  </div>
+</div>
+
 <div class="grid">
   <div class="card"><h2>Combined Hashrate</h2><div class="big" id="hashrate">-</div></div>
   <div class="card"><h2>CPU Hashrate</h2><div class="medium" id="cpu-hashrate">-</div><div class="row"><span class="label">Threads</span><span id="threads">-</span></div></div>
   <div class="card"><h2>GPU Hashrate</h2><div class="medium" id="gpu-hashrate">-</div><div class="row"><span class="label">Intensity</span><span id="gpu-intensity">-</span></div><div class="bar-bg"><div class="bar-fill" id="gpu-bar" style="width:0%"></div></div></div>
   <div class="card"><h2>Mining Stats</h2><div class="row"><span class="label">Total Hashes</span><span id="total-hashes">-</span></div><div class="row"><span class="label">Shares</span><span id="shares">-</span></div><div class="row"><span class="label">Accepted</span><span id="accepted" class="active">-</span></div><div class="row"><span class="label">Rejected</span><span id="rejected">-</span></div><div class="row"><span class="label">Blocks Found</span><span id="blocks" style="color:var(--accent)">-</span></div></div>
   <div class="card"><h2>Activity</h2><div class="row"><span class="label">Status</span><span id="activity">-</span></div><div class="row"><span class="label">Idle Time</span><span id="idle-time">-</span></div><div class="row"><span class="label">Uptime</span><span id="uptime">-</span></div></div>
+</div>
+
+<!-- Block Probability Table -->
+<div class="card" style="margin-top:4px">
+  <h2>Block Probability at Current Hashrate</h2>
+  <p style="color:var(--dim);font-size:0.8em;margin-bottom:10px">
+    Assumes current average hashrate sustained continuously. Network difficulty: ~<span id="prob-diff">700 EH/s</span>.
+    Each row shows the cumulative probability of finding at least one block.
+  </p>
+  <table style="width:100%;font-size:0.85em;border-collapse:collapse">
+    <thead>
+      <tr style="color:var(--dim);text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:6px 8px">Duration</th>
+        <th style="padding:6px 8px">Hashes</th>
+        <th style="padding:6px 8px">Probability</th>
+        <th style="padding:6px 8px">Odds</th>
+      </tr>
+    </thead>
+    <tbody id="prob-table">
+      <tr><td colspan="4" style="padding:6px 8px;color:var(--dim)">Waiting for hashrate data...</td></tr>
+    </tbody>
+  </table>
 </div>
 </div>
 
@@ -476,13 +512,106 @@ function loadConfig() {
 
 function loadHardware() {
   fetch('/api/hardware').then(function(r){return r.json()}).then(function(hw) {
+    // Settings tab
     var lines = [];
     lines.push('Platform: ' + hw.platform);
     lines.push('CPU: ' + hw.cpu_cores_performance + ' P-cores / ' + hw.cpu_cores_total + ' total');
     lines.push('GPU: ' + (hw.gpu_available ? (hw.gpu_name || 'Available') : 'Not available (install Xcode for Metal shader)'));
     if (hw.memory_gb > 0) lines.push('Memory: ' + hw.memory_gb + ' GB');
     document.getElementById('hw-info').innerHTML = lines.join('<br>');
+
+    // Mining tab system card
+    document.getElementById('sys-platform').textContent = hw.platform.charAt(0).toUpperCase() + hw.platform.slice(1);
+    document.getElementById('sys-cpu').textContent = hw.cpu_cores_performance + ' P-cores / ' + hw.cpu_cores_total + ' total';
+    document.getElementById('sys-gpu').textContent = hw.gpu_name || 'Unknown';
+    document.getElementById('sys-mem').textContent = hw.memory_gb > 0 ? hw.memory_gb + ' GB' : '-';
+    document.getElementById('sys-gpu-status').innerHTML = hw.gpu_available
+      ? '<span class="active">Enabled</span>'
+      : '<span style="color:var(--dim)">Unavailable</span>';
   });
+}
+
+/* ========== Block Probability ========== */
+// Network hashrate ~700 EH/s = 7e20 H/s
+// Blocks per second = 1/600
+// Probability of finding a block in time T:
+//   P = 1 - (1 - hashrate/network_hashrate)^(T * blocks_per_sec)
+// Simplified (since our share is tiny):
+//   P ≈ 1 - e^(-hashrate * T / (network_hashrate * 600))
+var NETWORK_HASHRATE = 7e20; // 700 EH/s
+var BLOCK_TIME = 600; // seconds
+
+var probDurations = [
+  { label: '1 hour',     secs: 3600 },
+  { label: '1 day',      secs: 86400 },
+  { label: '1 week',     secs: 604800 },
+  { label: '1 month',    secs: 2592000 },
+  { label: '6 months',   secs: 15552000 },
+  { label: '1 year',     secs: 31536000 },
+  { label: '5 years',    secs: 157680000 },
+  { label: '10 years',   secs: 315360000 },
+  { label: '100 years',  secs: 3153600000 },
+];
+
+function updateProbTable(hashrate) {
+  var tbody = document.getElementById('prob-table');
+  if (hashrate <= 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:6px 8px;color:var(--dim)">Start mining to see probabilities...</td></tr>';
+    return;
+  }
+
+  // Expected blocks per second at our hashrate
+  var blocksPerSec = hashrate / NETWORK_HASHRATE / BLOCK_TIME;
+
+  var rows = '';
+  for (var i = 0; i < probDurations.length; i++) {
+    var d = probDurations[i];
+    var totalHashes = hashrate * d.secs;
+    // P = 1 - e^(-lambda) where lambda = blocksPerSec * T
+    var lambda = blocksPerSec * d.secs;
+    var prob = 1 - Math.exp(-lambda);
+
+    var probStr, oddsStr, color;
+    if (prob < 1e-15) {
+      probStr = prob.toExponential(2);
+      oddsStr = '1 in ' + fmtOdds(1/prob);
+      color = 'var(--red)';
+    } else if (prob < 0.001) {
+      probStr = prob.toExponential(2);
+      oddsStr = '1 in ' + fmtOdds(1/prob);
+      color = 'var(--red)';
+    } else if (prob < 0.01) {
+      probStr = (prob * 100).toFixed(4) + '%';
+      oddsStr = '1 in ' + fmtOdds(1/prob);
+      color = 'var(--accent)';
+    } else if (prob < 0.5) {
+      probStr = (prob * 100).toFixed(2) + '%';
+      oddsStr = '1 in ' + Math.round(1/prob).toLocaleString();
+      color = 'var(--accent)';
+    } else {
+      probStr = (prob * 100).toFixed(1) + '%';
+      oddsStr = prob > 0.99 ? 'Near certain' : '~1 in ' + Math.round(1/prob);
+      color = 'var(--green)';
+    }
+
+    rows += '<tr style="border-bottom:1px solid var(--border)">';
+    rows += '<td style="padding:6px 8px">' + d.label + '</td>';
+    rows += '<td style="padding:6px 8px;color:var(--dim)">' + fmtBig(totalHashes) + '</td>';
+    rows += '<td style="padding:6px 8px;color:' + color + '">' + probStr + '</td>';
+    rows += '<td style="padding:6px 8px;color:var(--dim)">' + oddsStr + '</td>';
+    rows += '</tr>';
+  }
+  tbody.innerHTML = rows;
+}
+
+function fmtOdds(n) {
+  if (n >= 1e18) return (n/1e18).toFixed(1) + ' quintillion';
+  if (n >= 1e15) return (n/1e15).toFixed(1) + ' quadrillion';
+  if (n >= 1e12) return (n/1e12).toFixed(1) + ' trillion';
+  if (n >= 1e9) return (n/1e9).toFixed(1) + ' billion';
+  if (n >= 1e6) return (n/1e6).toFixed(1) + ' million';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + ' thousand';
+  return Math.round(n).toLocaleString();
 }
 
 function autoConfig() {
@@ -640,7 +769,9 @@ function startSSE() {
     document.getElementById('activity').innerHTML = d.is_user_active ? '<span class="active">Active</span>' : '<span class="idle">Idle</span>';
     document.getElementById('idle-time').textContent = fmtTime(d.idle_secs);
     document.getElementById('uptime').textContent = fmtTime(d.uptime_secs);
+    document.getElementById('sys-threads').textContent = d.cpu_threads + ' active';
     updateControlState(d.paused ? 'paused' : 'running');
+    updateProbTable(d.combined_hashrate);
   };
 }
 </script>

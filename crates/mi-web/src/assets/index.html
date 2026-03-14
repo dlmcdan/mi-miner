@@ -835,9 +835,13 @@ function startSSE() {
 
     // Batch all DOM writes in a single animation frame
     requestAnimationFrame(function() {
-      setText('hashrate', fmtHash(d.combined_hashrate));
-      setText('cpu-hashrate', fmtHash(d.cpu_hashrate));
-      setText('gpu-hashrate', fmtHash(d.gpu_hashrate));
+      var isStopped = d.paused;
+      var hr = isStopped ? 0 : d.combined_hashrate;
+      var cpuHr = isStopped ? 0 : d.cpu_hashrate;
+      var gpuHr = isStopped ? 0 : d.gpu_hashrate;
+      setText('hashrate', fmtHash(hr));
+      setText('cpu-hashrate', fmtHash(cpuHr));
+      setText('gpu-hashrate', fmtHash(gpuHr));
       setText('threads', String(d.cpu_threads));
       setText('gpu-intensity', d.gpu_intensity_pct+'%');
       setText('total-hashes', fmtBig(d.total_hashes));
@@ -874,7 +878,7 @@ function startSSE() {
       updateThrottleBanner(d.idle_secs, d.is_user_active);
 
       // Probability — only recalculate if hashrate changed >2%
-      var hr = d.combined_hashrate;
+      var hr = isStopped ? 0 : d.combined_hashrate;
       if (hr > 0 && (lastProbHashrate === 0 || Math.abs(hr - lastProbHashrate) / lastProbHashrate > 0.02)) {
         updateProbTable(hr);
         lastProbHashrate = hr;

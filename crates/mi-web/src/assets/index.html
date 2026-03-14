@@ -235,6 +235,7 @@
 <div id="connection"><span class="status off" id="conn-dot"></span>Connecting...</div>
 <div class="controls" style="margin-top:12px">
   <span class="mining-state running" id="mining-state">Running</span>
+  <button class="ctrl-btn resume hidden" id="btn-start" onclick="resumeMining()" style="background:var(--green);color:#000;border-color:var(--green)">Start</button>
   <button class="ctrl-btn pause" id="btn-pause" onclick="pauseMining()">Pause</button>
   <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()">Resume</button>
   <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()">Stop</button>
@@ -433,19 +434,37 @@ function switchTab(name) {
 }
 
 /* ========== Mining Controls ========== */
-function pauseMining() { fetch('/api/mining/pause',{method:'POST'}).then(function(r){return r.json()}).then(function(d){ if(d.success) updateControlState(true); }); }
-function resumeMining() { fetch('/api/mining/resume',{method:'POST'}).then(function(r){return r.json()}).then(function(d){ if(d.success) updateControlState(false); }); }
+function pauseMining() { fetch('/api/mining/pause',{method:'POST'}).then(function(r){return r.json()}).then(function(d){ if(d.success) updateControlState('paused'); }); }
+function resumeMining() { fetch('/api/mining/resume',{method:'POST'}).then(function(r){return r.json()}).then(function(d){ if(d.success) updateControlState('running'); }); }
 function stopMining() {
-  if(!confirm('Stop the miner? You will need to restart it from the command line.')) return;
-  fetch('/api/mining/stop',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
-    if(d.success){ var s=document.getElementById('mining-state'); s.textContent='Stopped'; s.className='mining-state stopped';
-      document.getElementById('btn-pause').classList.add('hidden'); document.getElementById('btn-resume').classList.add('hidden'); document.getElementById('btn-stop').disabled=true; }
+  fetch('/api/mining/pause',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+    if(d.success) updateControlState('stopped');
   });
 }
-function updateControlState(paused) {
-  var s=document.getElementById('mining-state'), bp=document.getElementById('btn-pause'), br=document.getElementById('btn-resume');
-  if(paused){ s.textContent='Paused'; s.className='mining-state paused'; bp.classList.add('hidden'); br.classList.remove('hidden'); }
-  else { s.textContent='Running'; s.className='mining-state running'; bp.classList.remove('hidden'); br.classList.add('hidden'); }
+function updateControlState(state) {
+  var st = document.getElementById('mining-state');
+  var btnStart = document.getElementById('btn-start');
+  var btnPause = document.getElementById('btn-pause');
+  var btnResume = document.getElementById('btn-resume');
+  var btnStop = document.getElementById('btn-stop');
+
+  btnStart.classList.add('hidden');
+  btnPause.classList.add('hidden');
+  btnResume.classList.add('hidden');
+
+  if (state === 'stopped' || state === true) {
+    st.textContent = 'Stopped'; st.className = 'mining-state stopped';
+    btnStart.classList.remove('hidden');
+    btnStop.disabled = true;
+  } else if (state === 'paused') {
+    st.textContent = 'Paused'; st.className = 'mining-state paused';
+    btnResume.classList.remove('hidden');
+    btnStop.disabled = false;
+  } else {
+    st.textContent = 'Running'; st.className = 'mining-state running';
+    btnPause.classList.remove('hidden');
+    btnStop.disabled = false;
+  }
 }
 
 /* ========== Configuration ========== */
@@ -621,7 +640,7 @@ function startSSE() {
     document.getElementById('activity').innerHTML = d.is_user_active ? '<span class="active">Active</span>' : '<span class="idle">Idle</span>';
     document.getElementById('idle-time').textContent = fmtTime(d.idle_secs);
     document.getElementById('uptime').textContent = fmtTime(d.uptime_secs);
-    updateControlState(d.paused);
+    updateControlState(d.paused ? 'paused' : 'running');
   };
 }
 </script>

@@ -262,26 +262,16 @@
   <div class="card"><h2>Activity</h2><div class="row"><span class="label">Status</span><span id="activity">-</span></div><div class="row"><span class="label">Idle Time</span><span id="idle-time">-</span></div><div class="row"><span class="label">Uptime</span><span id="uptime">-</span></div></div>
 </div>
 
-<!-- Block Probability Table -->
+<!-- Block Probability -->
 <div class="card" style="margin-top:4px">
-  <h2>Block Probability at Current Hashrate</h2>
-  <p style="color:var(--dim);font-size:0.8em;margin-bottom:10px">
-    Assumes current average hashrate sustained continuously. Network difficulty: ~<span id="prob-diff">700 EH/s</span>.
-    Each row shows the cumulative probability of finding at least one block.
+  <h2>Expected Time to Find a Block</h2>
+  <p style="color:var(--dim);font-size:0.8em;margin-bottom:14px">
+    Based on current hashrate vs network (~700 EH/s). Block finding follows a Poisson process &mdash;
+    the mean time is shown with &plusmn;1&sigma;, 2&sigma;, and 3&sigma; ranges.
   </p>
-  <table style="width:100%;font-size:0.85em;border-collapse:collapse">
-    <thead>
-      <tr style="color:var(--dim);text-align:left;border-bottom:1px solid var(--border)">
-        <th style="padding:6px 8px">Duration</th>
-        <th style="padding:6px 8px">Hashes</th>
-        <th style="padding:6px 8px">Probability</th>
-        <th style="padding:6px 8px">Odds</th>
-      </tr>
-    </thead>
-    <tbody id="prob-table">
-      <tr><td colspan="4" style="padding:6px 8px;color:var(--dim)">Waiting for hashrate data...</td></tr>
-    </tbody>
-  </table>
+  <div id="prob-display" style="font-size:0.9em">
+    <div style="color:var(--dim)">Waiting for hashrate data...</div>
+  </div>
 </div>
 </div>
 
@@ -532,86 +522,88 @@ function loadHardware() {
 }
 
 /* ========== Block Probability ========== */
-// Network hashrate ~700 EH/s = 7e20 H/s
-// Blocks per second = 1/600
-// Probability of finding a block in time T:
-//   P = 1 - (1 - hashrate/network_hashrate)^(T * blocks_per_sec)
-// Simplified (since our share is tiny):
-//   P ≈ 1 - e^(-hashrate * T / (network_hashrate * 600))
-var NETWORK_HASHRATE = 7e20; // 700 EH/s
-var BLOCK_TIME = 600; // seconds
+// Block finding is a Poisson process.
+// Mean time to find a block = network_hashrate * block_time / our_hashrate
+// For Poisson with rate lambda = 1/mean:
+//   Variance = mean^2 (exponential distribution)
+//   Std dev = mean
+// So: mean ± 1σ = [0, 2*mean], ± 2σ = [0, 3*mean], ± 3σ = [0, 4*mean]
+// (clamped to 0 on the low end since time can't be negative)
+//
+// More precisely, for exponential distribution:
+//   Median = mean * ln(2) ≈ 0.693 * mean
+//   P(T ≤ t) = 1 - e^(-t/mean)
+//   Confidence intervals via quantiles:
+//     68.3% (1σ equivalent): [0.0513*mean, 1.841*mean]
+//     95.4% (2σ equivalent): [0.00233*mean, 3.505*mean]
+//     99.7% (3σ equivalent): [0.0000601*mean, 5.298*mean]
 
-var probDurations = [
-  { label: '1 hour',     secs: 3600 },
-  { label: '1 day',      secs: 86400 },
-  { label: '1 week',     secs: 604800 },
-  { label: '1 month',    secs: 2592000 },
-  { label: '6 months',   secs: 15552000 },
-  { label: '1 year',     secs: 31536000 },
-  { label: '5 years',    secs: 157680000 },
-  { label: '10 years',   secs: 315360000 },
-  { label: '100 years',  secs: 3153600000 },
-];
+var NETWORK_HASHRATE = 7e20; // 700 EH/s
+var BLOCK_TIME = 600; // seconds per block
+var SECS_PER_YEAR = 31536000;
 
 function updateProbTable(hashrate) {
-  var tbody = document.getElementById('prob-table');
+  var el = document.getElementById('prob-display');
   if (hashrate <= 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:6px 8px;color:var(--dim)">Start mining to see probabilities...</td></tr>';
+    el.innerHTML = '<div style="color:var(--dim)">Start mining to see expected time...</div>';
     return;
   }
 
-  // Expected blocks per second at our hashrate
-  var blocksPerSec = hashrate / NETWORK_HASHRATE / BLOCK_TIME;
+  // Mean time to find one block (seconds)
+  var meanSecs = NETWORK_HASHRATE * BLOCK_TIME / hashrate;
+  var meanYears = meanSecs / SECS_PER_YEAR;
 
-  var rows = '';
-  for (var i = 0; i < probDurations.length; i++) {
-    var d = probDurations[i];
-    var totalHashes = hashrate * d.secs;
-    // P = 1 - e^(-lambda) where lambda = blocksPerSec * T
-    var lambda = blocksPerSec * d.secs;
-    var prob = 1 - Math.exp(-lambda);
+  // Exponential distribution quantiles for σ-equivalent confidence intervals
+  // 1σ (68.3%): [Q(0.1585), Q(0.8415)] where Q(p) = -mean * ln(1-p)
+  var lo1 = meanSecs * 0.0513;   // ~5% quantile
+  var hi1 = meanSecs * 1.841;    // ~84% quantile
+  var lo2 = meanSecs * 0.00233;  // ~0.23% quantile
+  var hi2 = meanSecs * 3.505;    // ~97% quantile
+  var lo3 = meanSecs * 0.0000601;// ~0.006% quantile
+  var hi3 = meanSecs * 5.298;    // ~99.5% quantile
 
-    var probStr, oddsStr, color;
-    if (prob < 1e-15) {
-      probStr = prob.toExponential(2);
-      oddsStr = '1 in ' + fmtOdds(1/prob);
-      color = 'var(--red)';
-    } else if (prob < 0.001) {
-      probStr = prob.toExponential(2);
-      oddsStr = '1 in ' + fmtOdds(1/prob);
-      color = 'var(--red)';
-    } else if (prob < 0.01) {
-      probStr = (prob * 100).toFixed(4) + '%';
-      oddsStr = '1 in ' + fmtOdds(1/prob);
-      color = 'var(--accent)';
-    } else if (prob < 0.5) {
-      probStr = (prob * 100).toFixed(2) + '%';
-      oddsStr = '1 in ' + Math.round(1/prob).toLocaleString();
-      color = 'var(--accent)';
-    } else {
-      probStr = (prob * 100).toFixed(1) + '%';
-      oddsStr = prob > 0.99 ? 'Near certain' : '~1 in ' + Math.round(1/prob);
-      color = 'var(--green)';
-    }
+  var html = '';
+  html += '<table style="width:100%;border-collapse:collapse">';
+  html += '<tr style="border-bottom:1px solid var(--border)">';
+  html += '<td style="padding:10px 8px;color:var(--dim);width:140px">Mean (expected)</td>';
+  html += '<td style="padding:10px 8px"><span class="big" style="font-size:1.6em">' + fmtYears(meanYears) + '</span></td>';
+  html += '</tr>';
 
-    rows += '<tr style="border-bottom:1px solid var(--border)">';
-    rows += '<td style="padding:6px 8px">' + d.label + '</td>';
-    rows += '<td style="padding:6px 8px;color:var(--dim)">' + fmtBig(totalHashes) + '</td>';
-    rows += '<td style="padding:6px 8px;color:' + color + '">' + probStr + '</td>';
-    rows += '<td style="padding:6px 8px;color:var(--dim)">' + oddsStr + '</td>';
-    rows += '</tr>';
-  }
-  tbody.innerHTML = rows;
+  html += '<tr style="border-bottom:1px solid var(--border)">';
+  html += '<td style="padding:8px;color:var(--dim)">&plusmn; 1&sigma; (68%)</td>';
+  html += '<td style="padding:8px;color:var(--blue)">' + fmtYears(lo1/SECS_PER_YEAR) + ' &ndash; ' + fmtYears(hi1/SECS_PER_YEAR) + '</td>';
+  html += '</tr>';
+
+  html += '<tr style="border-bottom:1px solid var(--border)">';
+  html += '<td style="padding:8px;color:var(--dim)">&plusmn; 2&sigma; (95%)</td>';
+  html += '<td style="padding:8px;color:var(--accent)">' + fmtYears(lo2/SECS_PER_YEAR) + ' &ndash; ' + fmtYears(hi2/SECS_PER_YEAR) + '</td>';
+  html += '</tr>';
+
+  html += '<tr>';
+  html += '<td style="padding:8px;color:var(--dim)">&plusmn; 3&sigma; (99.7%)</td>';
+  html += '<td style="padding:8px;color:var(--red)">' + fmtYears(lo3/SECS_PER_YEAR) + ' &ndash; ' + fmtYears(hi3/SECS_PER_YEAR) + '</td>';
+  html += '</tr>';
+  html += '</table>';
+
+  // Quick-glance summary
+  var median = meanSecs * 0.6931; // ln(2)
+  html += '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);color:var(--dim);font-size:0.8em">';
+  html += 'Median: ' + fmtYears(median/SECS_PER_YEAR) + ' &bull; ';
+  html += 'Hashrate share: ' + (hashrate/NETWORK_HASHRATE * 100).toExponential(2) + '% of network';
+  html += '</div>';
+
+  el.innerHTML = html;
 }
 
-function fmtOdds(n) {
-  if (n >= 1e18) return (n/1e18).toFixed(1) + ' quintillion';
-  if (n >= 1e15) return (n/1e15).toFixed(1) + ' quadrillion';
-  if (n >= 1e12) return (n/1e12).toFixed(1) + ' trillion';
-  if (n >= 1e9) return (n/1e9).toFixed(1) + ' billion';
-  if (n >= 1e6) return (n/1e6).toFixed(1) + ' million';
-  if (n >= 1e3) return (n/1e3).toFixed(1) + ' thousand';
-  return Math.round(n).toLocaleString();
+function fmtYears(y) {
+  if (y >= 1e9) return (y/1e9).toFixed(1) + ' billion years';
+  if (y >= 1e6) return (y/1e6).toFixed(1) + ' million years';
+  if (y >= 1000) return (y/1000).toFixed(1) + 'K years';
+  if (y >= 1) return y.toFixed(1) + ' years';
+  if (y * 12 >= 1) return (y * 12).toFixed(1) + ' months';
+  if (y * 365 >= 1) return (y * 365).toFixed(1) + ' days';
+  if (y * 365 * 24 >= 1) return (y * 365 * 24).toFixed(1) + ' hours';
+  return (y * 365 * 24 * 60).toFixed(1) + ' minutes';
 }
 
 function autoConfig() {

@@ -250,10 +250,10 @@
 <div id="connection"><span class="status off" id="conn-dot"></span>Connecting...</div>
 <div class="controls" style="margin-top:12px">
   <span class="mining-state running" id="mining-state">Running</span>
-  <button class="ctrl-btn resume hidden" id="btn-start" onclick="resumeMining()" style="background:var(--green);color:#000;border-color:var(--green)">Start</button>
-  <button class="ctrl-btn pause" id="btn-pause" onclick="pauseMining()">Pause</button>
-  <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()">Resume</button>
-  <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()">Stop</button>
+  <button class="ctrl-btn resume hidden" id="btn-start" onclick="resumeMining()" style="background:var(--green);color:#000;border-color:var(--green)" title="Resume mining on all threads and GPU">Start</button>
+  <button class="ctrl-btn pause" id="btn-pause" onclick="pauseMining()" title="Temporarily pause all mining. Workers sleep until resumed.">Pause</button>
+  <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()" title="Resume mining from where it was paused">Resume</button>
+  <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()" title="Stop all mining. Click Start to begin again.">Stop</button>
 </div>
 
 <!-- Optimization Warnings -->
@@ -261,28 +261,49 @@
 
 <!-- System Info -->
 <div class="card" style="margin-bottom:16px">
-  <h2>System</h2>
+  <h2 title="Hardware and configuration detected on this machine">System</h2>
   <div style="display:flex;flex-wrap:wrap;gap:24px;font-size:0.85em">
-    <div><span class="label">Platform</span> <span id="sys-platform">-</span></div>
-    <div><span class="label">CPU</span> <span id="sys-cpu">-</span></div>
-    <div><span class="label">GPU</span> <span id="sys-gpu">-</span></div>
-    <div><span class="label">Memory</span> <span id="sys-mem">-</span></div>
-    <div><span class="label">Threads</span> <span id="sys-threads">-</span></div>
-    <div><span class="label">GPU Mining</span> <span id="sys-gpu-status">-</span></div>
+    <div title="Operating system running the miner"><span class="label">Platform</span> <span id="sys-platform">-</span></div>
+    <div title="Number of high-performance CPU cores vs total (includes efficiency cores)"><span class="label">CPU</span> <span id="sys-cpu">-</span></div>
+    <div title="Graphics processor used for GPU-accelerated mining via Metal compute shaders"><span class="label">GPU</span> <span id="sys-gpu">-</span></div>
+    <div title="Total system memory"><span class="label">Memory</span> <span id="sys-mem">-</span></div>
+    <div title="Number of CPU mining threads currently active"><span class="label">Threads</span> <span id="sys-threads">-</span></div>
+    <div title="Whether GPU mining via Metal compute shaders is active"><span class="label">GPU Mining</span> <span id="sys-gpu-status">-</span></div>
   </div>
 </div>
 
 <div class="grid">
-  <div class="card"><h2>Combined Hashrate</h2><div class="big" id="hashrate">-</div></div>
-  <div class="card"><h2>CPU Hashrate</h2><div class="medium" id="cpu-hashrate">-</div><div class="row"><span class="label">Threads</span><span id="threads">-</span></div></div>
-  <div class="card"><h2>GPU Hashrate</h2><div class="medium" id="gpu-hashrate">-</div><div class="row"><span class="label">Intensity</span><span id="gpu-intensity">-</span></div><div class="bar-bg"><div class="bar-fill" id="gpu-bar" style="width:0%"></div></div></div>
-  <div class="card"><h2>Mining Stats</h2><div class="row"><span class="label">Total Hashes</span><span id="total-hashes">-</span></div><div class="row"><span class="label">Shares</span><span id="shares">-</span></div><div class="row"><span class="label">Accepted</span><span id="accepted" class="active">-</span></div><div class="row"><span class="label">Rejected</span><span id="rejected">-</span></div><div class="row"><span class="label">Blocks Found</span><span id="blocks" style="color:var(--accent)">-</span></div></div>
-  <div class="card"><h2>Activity</h2><div class="row"><span class="label">Status</span><span id="activity">-</span></div><div class="row"><span class="label">Idle Time</span><span id="idle-time">-</span></div><div class="row"><span class="label">Uptime</span><span id="uptime">-</span></div></div>
+  <div class="card" title="Total hashing speed across all CPU threads and GPU combined">
+    <h2>Combined Hashrate</h2><div class="big" id="hashrate">-</div>
+  </div>
+  <div class="card" title="Hashing speed from CPU threads using SHA-256d with ARM hardware acceleration">
+    <h2>CPU Hashrate</h2><div class="medium" id="cpu-hashrate">-</div>
+    <div class="row"><span class="label" title="Number of CPU threads actively mining">Threads</span><span id="threads">-</span></div>
+  </div>
+  <div class="card" title="Hashing speed from Metal GPU compute shaders (requires Xcode)">
+    <h2>GPU Hashrate</h2><div class="medium" id="gpu-hashrate">-</div>
+    <div class="row"><span class="label" title="Percentage of GPU capacity being used (0-100%). Reduced when user is active.">Intensity</span><span id="gpu-intensity">-</span></div>
+    <div class="bar-bg"><div class="bar-fill" id="gpu-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <h2 title="Cumulative mining statistics (persisted across restarts)">Mining Stats</h2>
+    <div class="row"><span class="label" title="Total number of SHA-256d hashes computed across all sessions">Total Hashes</span><span id="total-hashes">-</span></div>
+    <div class="row"><span class="label" title="Number of shares submitted to the mining pool">Shares</span><span id="shares">-</span></div>
+    <div class="row"><span class="label" title="Shares accepted by the pool as valid proof of work">Accepted</span><span id="accepted" class="active">-</span></div>
+    <div class="row"><span class="label" title="Shares rejected by the pool (stale, duplicate, or invalid)">Rejected</span><span id="rejected">-</span></div>
+    <div class="row"><span class="label" title="Number of Bitcoin blocks found. Each block earns ~3.125 BTC sent to your wallet.">Blocks Found</span><span id="blocks" style="color:var(--accent)">-</span></div>
+  </div>
+  <div class="card">
+    <h2 title="User activity detection for adaptive throttling">Activity</h2>
+    <div class="row"><span class="label" title="Whether keyboard/mouse input has been detected recently">Status</span><span id="activity">-</span></div>
+    <div class="row"><span class="label" title="Seconds since last keyboard or mouse input">Idle Time</span><span id="idle-time">-</span></div>
+    <div class="row"><span class="label" title="How long the miner has been running this session">Uptime</span><span id="uptime">-</span></div>
+  </div>
 </div>
 
 <!-- Block Probability -->
 <div class="card" style="margin-top:4px">
-  <h2>Expected Time to Find a Block</h2>
+  <h2 title="Statistical estimate of how long you'd need to mine continuously at current hashrate to find a Bitcoin block">Expected Time to Find a Block</h2>
   <p style="color:var(--dim);font-size:0.8em;margin-bottom:14px">
     Based on current hashrate vs network (~700 EH/s). Block finding follows a Poisson process &mdash;
     the mean time is shown with &plusmn;1&sigma;, 2&sigma;, and 3&sigma; ranges.
@@ -298,55 +319,55 @@
 <div class="settings">
 
   <div class="settings-section">
-    <h3>Hardware Detection</h3>
+    <h3 title="Detected hardware capabilities on this machine">Hardware Detection</h3>
     <div id="hw-info" style="color:var(--dim);font-size:0.85em;margin-bottom:12px;">Detecting...</div>
-    <button class="test-btn" id="btn-auto-config" onclick="autoConfig()">Auto Configure</button>
+    <button class="test-btn" id="btn-auto-config" onclick="autoConfig()" title="Detect hardware and set optimal mining configuration automatically">Auto Configure</button>
     <span class="save-msg" id="auto-msg"></span>
     <div id="auto-result"></div>
   </div>
 
   <div class="settings-section">
-    <h3>Mining</h3>
-    <div class="field"><label>CPU Threads</label><input type="number" id="cfg-threads" min="1" max="128"></div>
-    <div class="field"><label>CPU Only</label><input type="checkbox" id="cfg-cpu-only"></div>
-    <div class="field"><label>GPU Only</label><input type="checkbox" id="cfg-gpu-only"></div>
+    <h3 title="CPU mining thread configuration">Mining</h3>
+    <div class="field"><label title="Number of OS threads dedicated to SHA-256d hashing. Best set to your performance core count.">CPU Threads</label><input type="number" id="cfg-threads" min="1" max="128"></div>
+    <div class="field"><label title="Disable GPU mining and use only CPU threads. Useful if GPU causes instability.">CPU Only</label><input type="checkbox" id="cfg-cpu-only"></div>
+    <div class="field"><label title="Disable CPU mining and use only GPU. CPU threads will not hash.">GPU Only</label><input type="checkbox" id="cfg-gpu-only"></div>
   </div>
 
   <div class="settings-section">
-    <h3>GPU</h3>
-    <div class="field"><label>GPU Enabled</label><input type="checkbox" id="cfg-gpu-enabled"></div>
-    <div class="field"><label>GPU Intensity</label><input type="range" id="cfg-gpu-intensity" min="0" max="100" step="5"><span class="range-val" id="cfg-gpu-intensity-val">100%</span></div>
-    <div class="field"><label>Batch Size (log2)</label><input type="number" id="cfg-gpu-batch" min="18" max="28"></div>
+    <h3 title="Metal compute shader GPU mining configuration (Apple Silicon)">GPU</h3>
+    <div class="field"><label title="Enable or disable GPU mining via Metal compute shaders. Requires Xcode.">GPU Enabled</label><input type="checkbox" id="cfg-gpu-enabled"></div>
+    <div class="field"><label title="How much GPU capacity to use (0-100%). Lower values reduce heat and UI lag. Higher values increase hashrate.">GPU Intensity</label><input type="range" id="cfg-gpu-intensity" min="0" max="100" step="5"><span class="range-val" id="cfg-gpu-intensity-val">100%</span></div>
+    <div class="field"><label title="Number of nonces per GPU dispatch as a power of 2. Default 24 = ~16 million nonces per batch. Higher = more throughput but longer per-batch latency.">Batch Size (log2)</label><input type="number" id="cfg-gpu-batch" min="18" max="28"></div>
   </div>
 
   <div class="settings-section">
-    <h3>Stratum (Pool)</h3>
-    <div class="field"><label>URL</label><input type="text" id="cfg-stratum-url"></div>
-    <div class="field"><label>Worker</label><input type="text" id="cfg-stratum-worker"></div>
-    <div class="field"><label>Password</label><input type="password" id="cfg-stratum-pass"></div>
-    <button class="test-btn" id="btn-test-conn" onclick="testConnection()">Test Connection</button>
+    <h3 title="Connection settings for the Stratum v1 mining pool">Stratum (Pool)</h3>
+    <div class="field"><label title="Stratum pool URL. Default connects to solo.ckpool.org for solo mining (full block reward).">URL</label><input type="text" id="cfg-stratum-url"></div>
+    <div class="field"><label title="Your Bitcoin address followed by a worker name (e.g., bc1q...address.mi-miner). The pool sends block rewards to this address.">Worker</label><input type="text" id="cfg-stratum-worker"></div>
+    <div class="field"><label title="Pool password. Usually 'x' for solo mining pools.">Password</label><input type="password" id="cfg-stratum-pass"></div>
+    <button class="test-btn" id="btn-test-conn" onclick="testConnection()" title="Test TCP connection to the stratum pool server">Test Connection</button>
     <div id="conn-result"></div>
   </div>
 
   <div class="settings-section">
-    <h3>Activity Throttling</h3>
-    <div class="field"><label>Enabled</label><input type="checkbox" id="cfg-activity-enabled"></div>
-    <div class="field"><label>Idle Timeout (sec)</label><input type="number" id="cfg-idle-timeout" min="10" max="3600"></div>
-    <div class="field"><label>Min Threads (active)</label><input type="number" id="cfg-min-threads" min="0" max="128"></div>
-    <div class="field"><label>Min GPU Intensity (active)</label><input type="range" id="cfg-min-gpu" min="0" max="100" step="5"><span class="range-val" id="cfg-min-gpu-val">10%</span></div>
-    <div class="field"><label>Ramp Up (sec)</label><input type="number" id="cfg-ramp-up" min="0" max="300"></div>
-    <div class="field"><label>Ramp Down (sec)</label><input type="number" id="cfg-ramp-down" min="0" max="60"></div>
-    <div class="field"><label>CPU Threshold %</label><input type="number" id="cfg-cpu-thresh" min="0" max="100"></div>
+    <h3 title="Automatically reduce mining intensity when you're using the computer, and ramp up when idle">Activity Throttling</h3>
+    <div class="field"><label title="Enable or disable automatic throttling based on keyboard/mouse activity">Enabled</label><input type="checkbox" id="cfg-activity-enabled"></div>
+    <div class="field"><label title="Seconds of no keyboard/mouse input before mining ramps up to full speed">Idle Timeout (sec)</label><input type="number" id="cfg-idle-timeout" min="10" max="3600"></div>
+    <div class="field"><label title="Minimum CPU threads to keep mining with while user is actively using the computer">Min Threads (active)</label><input type="number" id="cfg-min-threads" min="0" max="128"></div>
+    <div class="field"><label title="Minimum GPU intensity while user is active. Keeps GPU barely ticking to avoid pipeline stalls on resume.">Min GPU Intensity (active)</label><input type="range" id="cfg-min-gpu" min="0" max="100" step="5"><span class="range-val" id="cfg-min-gpu-val">10%</span></div>
+    <div class="field"><label title="How many seconds to gradually ramp up to full speed after user goes idle. Prevents sudden load spike.">Ramp Up (sec)</label><input type="number" id="cfg-ramp-up" min="0" max="300"></div>
+    <div class="field"><label title="How many seconds to ramp down when user becomes active. Fast ramp-down avoids disturbing the user.">Ramp Down (sec)</label><input type="number" id="cfg-ramp-down" min="0" max="60"></div>
+    <div class="field"><label title="Don't ramp up to full speed if system CPU usage (from other apps) is above this percentage. Prevents overloading during builds or renders.">CPU Threshold %</label><input type="number" id="cfg-cpu-thresh" min="0" max="100"></div>
   </div>
 
   <div class="settings-section">
-    <h3>Web Dashboard</h3>
-    <div class="field"><label>Bind Address</label><input type="text" id="cfg-web-bind"></div>
+    <h3 title="Web dashboard server settings">Web Dashboard</h3>
+    <div class="field"><label title="IP address and port the dashboard listens on. Use 127.0.0.1 for local-only access. Requires restart to change.">Bind Address</label><input type="text" id="cfg-web-bind"></div>
   </div>
 
   <div class="settings-section">
-    <h3>Logging</h3>
-    <div class="field"><label>Level</label>
+    <h3 title="Application logging verbosity">Logging</h3>
+    <div class="field"><label title="Log detail level. 'info' is recommended. 'debug' and 'trace' produce verbose output useful for troubleshooting.">Level</label>
       <select id="cfg-log-level" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:0.85em;border-radius:4px;">
         <option value="trace">trace</option>
         <option value="debug">debug</option>
@@ -359,7 +380,7 @@
 
   <div class="settings-section">
     <h3>Diagnostics</h3>
-    <button class="test-btn" id="btn-test-bench" onclick="testBenchmark()">Run Quick Benchmark (3s)</button>
+    <button class="test-btn" id="btn-test-bench" onclick="testBenchmark()" title="Run a 3-second single-core CPU benchmark to measure hashing speed on this machine">Run Quick Benchmark (3s)</button>
     <div id="bench-result"></div>
   </div>
 

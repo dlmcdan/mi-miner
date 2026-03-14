@@ -660,7 +660,7 @@ function updateProbTable(hashrate) {
   var median = meanSecs * 0.6931; // ln(2)
   html += '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);color:var(--dim);font-size:0.8em">';
   html += 'Median: ' + fmtYears(median/SECS_PER_YEAR) + ' &bull; ';
-  html += 'Hashrate share: ' + (hashrate/NETWORK_HASHRATE * 100).toExponential(2) + '% of network';
+  html += 'Your hashrate represents ' + (hashrate/NETWORK_HASHRATE * 100).toExponential(2) + '% of the total Bitcoin network';
   html += '</div>';
 
   el.innerHTML = html;

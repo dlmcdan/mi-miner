@@ -178,6 +178,8 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     tracing::info!("GPU enabled: {}", config.gpu.enabled);
 
     let stats = MiningStats::new();
+    let prior_persistent = stats.load_persistent();
+    let prior_uptime = prior_persistent.total_uptime_secs;
     let live_config = mi_core::LiveConfig::new(config.clone());
 
     let pid_path = mi_core::config::dirs_path().join("mi-miner.pid");
@@ -193,18 +195,18 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     });
 
     // GPU manager
-    let _gpu_manager = if config.gpu.enabled && !config.mining.cpu_only {
+    let gpu_available = if config.gpu.enabled && !config.mining.cpu_only {
         let mgr = mi_gpu::GpuManager::new(stats.clone(), config.gpu.batch_size_log2);
         if mgr.is_available() {
             tracing::info!("GPU mining: ACTIVE");
-            Some(mgr)
+            true
         } else {
             tracing::warn!("GPU mining: NOT AVAILABLE (falling back to CPU-only)");
-            None
+            false
         }
     } else {
         tracing::info!("GPU mining: DISABLED");
-        None
+        false
     };
 
     // Channel for share submission to stratum
@@ -232,26 +234,16 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         None
     };
 
-    // Work distribution: stratum callback updates SharedWork, workers pick it up instantly
+    // Shared work visible to both CPU workers and GPU thread
+    let global_shared_work = if let Some(ref pool) = mining_pool {
+        pool.shared_work()
+    } else {
+        mi_mining::worker::SharedWork::new()
+    };
+
+    // Work distribution: stratum callback updates SharedWork
     let on_work: Arc<mi_network::stratum::client::WorkCallback> = {
-        let (work_tx, work_rx) = std::sync::mpsc::sync_channel::<mi_mining::worker::Work>(2);
-
-        if let Some(ref pool) = mining_pool {
-            let shared_work = pool.shared_work();
-            let stats = stats.clone();
-            std::thread::Builder::new()
-                .name("work-updater".to_string())
-                .spawn(move || {
-                    while let Ok(work) = work_rx.recv() {
-                        if stats.should_stop.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        shared_work.update(work);
-                    }
-                })
-                .ok();
-        }
-
+        let shared_work = global_shared_work.clone();
         Arc::new(Box::new(
             move |template: mi_mining::block::BlockTemplate, target: [u8; 32]| {
                 let (_header, header_bytes) = template.build_header(0);
@@ -264,10 +256,130 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                 };
 
                 tracing::info!(job = template.job_id, "New work → miners");
-                let _ = work_tx.send(work);
+                shared_work.update(work);
             },
         ))
     };
+
+    // GPU mining thread — reads SharedWork and dispatches Metal compute batches
+    if gpu_available {
+        let shared_work = global_shared_work.clone();
+        let stats_gpu = stats.clone();
+        let live_config_gpu = live_config.clone();
+        let submit_tx_gpu = submit_tx.clone();
+        let batch_size_log2 = config.gpu.batch_size_log2;
+
+        std::thread::Builder::new()
+            .name("gpu-miner".to_string())
+            .spawn(move || {
+                let mut mgr = mi_gpu::GpuManager::new(stats_gpu.clone(), batch_size_log2);
+                let mut last_gen: u64 = 0;
+                let mut gpu_nonce: u32 = 0;
+
+                tracing::info!("GPU mining thread started");
+
+                loop {
+                    if stats_gpu.should_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    while stats_gpu.paused.load(Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        if stats_gpu.should_stop.load(Ordering::Relaxed) {
+                            return;
+                        }
+                    }
+
+                    // Check for new work
+                    if let Some((gen, work)) = shared_work.get_if_new(last_gen) {
+                        last_gen = gen;
+                        gpu_nonce = 0;
+
+                        // Update GPU intensity from live config
+                        mgr.set_intensity(live_config_gpu.gpu_intensity());
+                    }
+
+                    // Get current work
+                    let work = {
+                        let guard = shared_work.work.lock().unwrap();
+                        guard.clone()
+                    };
+
+                    let work = match work {
+                        Some(w) => w,
+                        None => {
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            continue;
+                        }
+                    };
+
+                    // Convert header to midstate format for GPU
+                    let header = &work.header;
+                    let mut midstate = [0u32; 8];
+                    let mut tail = [0u32; 4];
+                    let mut target = [0u32; 8];
+
+                    // Parse midstate from header bytes 0-31 (first 8 u32 big-endian)
+                    // Actually the GPU needs the SHA-256 midstate, not raw header bytes.
+                    // For now, pass the header tail words and let the GPU do full hashing.
+                    for i in 0..4 {
+                        tail[i] = u32::from_le_bytes([
+                            header[64 + i * 4],
+                            header[64 + i * 4 + 1],
+                            header[64 + i * 4 + 2],
+                            header[64 + i * 4 + 3],
+                        ]);
+                    }
+
+                    // Compute midstate using the same function as CPU
+                    let midstate_bytes = mi_core::bitcoin_util::compute_midstate(
+                        header.try_into().unwrap(),
+                    );
+                    for i in 0..8 {
+                        midstate[i] = u32::from_be_bytes([
+                            midstate_bytes[i * 4],
+                            midstate_bytes[i * 4 + 1],
+                            midstate_bytes[i * 4 + 2],
+                            midstate_bytes[i * 4 + 3],
+                        ]);
+                    }
+
+                    for i in 0..8 {
+                        target[i] = u32::from_be_bytes([
+                            work.target[i * 4],
+                            work.target[i * 4 + 1],
+                            work.target[i * 4 + 2],
+                            work.target[i * 4 + 3],
+                        ]);
+                    }
+
+                    let (found, _batch_count) = mgr.mine_batch(
+                        &midstate, &tail, &target, gpu_nonce,
+                    );
+
+                    gpu_nonce = gpu_nonce.wrapping_add(mgr.batch_size() as u32);
+
+                    if let Some((nonce, _hash)) = found {
+                        tracing::info!(nonce = nonce, "GPU found valid nonce!");
+                        let submission = mi_network::stratum::client::ShareSubmission {
+                            job_id: work.job_id.clone(),
+                            extranonce2: work.extranonce,
+                            ntime: String::new(),
+                            nonce,
+                        };
+                        let _ = submit_tx_gpu.try_send(submission);
+                    }
+
+                    // Check for new work between batches
+                    if shared_work.generation.load(Ordering::Acquire) != last_gen {
+                        continue;
+                    }
+                }
+
+                tracing::info!("GPU mining thread exiting");
+            })
+            .ok();
+    }
 
     // Stratum client — only connect if we have a valid wallet/address
     if needs_wallet {
@@ -385,6 +497,9 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
 
     let _ = std::fs::remove_file(&pid_path);
 
+    // Save cumulative stats to disk
+    stats.save_persistent(prior_uptime);
+
     let snapshot = stats.snapshot();
     tracing::info!(
         total_hashes = snapshot.total_hashes,
@@ -394,7 +509,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         shares_accepted = snapshot.shares_accepted,
         blocks_found = snapshot.blocks_found,
         uptime_secs = snapshot.uptime_secs,
-        "Final stats"
+        "Final stats (saved to disk)"
     );
 }
 

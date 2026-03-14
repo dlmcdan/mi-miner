@@ -115,6 +115,74 @@ pub struct StatsSnapshot {
     pub paused: bool,
 }
 
+/// Persistent stats saved to disk across runs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct PersistentStats {
+    pub total_cpu_hashes: u64,
+    pub total_gpu_hashes: u64,
+    pub total_shares_submitted: u64,
+    pub total_shares_accepted: u64,
+    pub total_shares_rejected: u64,
+    pub total_blocks_found: u64,
+    pub total_uptime_secs: u64,
+}
+
+impl PersistentStats {
+    fn path() -> std::path::PathBuf {
+        crate::config::dirs_path().join("stats.json")
+    }
+
+    pub fn load() -> Self {
+        let path = Self::path();
+        if path.exists() {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default()
+        } else {
+            Self::default()
+        }
+    }
+
+    pub fn save(&self) {
+        let path = Self::path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
+}
+
+impl MiningStats {
+    /// Load persistent stats and add them to the current session counters.
+    pub fn load_persistent(&self) -> PersistentStats {
+        let p = PersistentStats::load();
+        self.cpu_hashes.fetch_add(p.total_cpu_hashes, Ordering::Relaxed);
+        self.gpu_hashes.fetch_add(p.total_gpu_hashes, Ordering::Relaxed);
+        self.shares_submitted.fetch_add(p.total_shares_submitted, Ordering::Relaxed);
+        self.shares_accepted.fetch_add(p.total_shares_accepted, Ordering::Relaxed);
+        self.shares_rejected.fetch_add(p.total_shares_rejected, Ordering::Relaxed);
+        self.blocks_found.fetch_add(p.total_blocks_found, Ordering::Relaxed);
+        p
+    }
+
+    /// Save current stats to disk.
+    pub fn save_persistent(&self, prior_uptime: u64) {
+        let p = PersistentStats {
+            total_cpu_hashes: self.cpu_hashes.load(Ordering::Relaxed),
+            total_gpu_hashes: self.gpu_hashes.load(Ordering::Relaxed),
+            total_shares_submitted: self.shares_submitted.load(Ordering::Relaxed),
+            total_shares_accepted: self.shares_accepted.load(Ordering::Relaxed),
+            total_shares_rejected: self.shares_rejected.load(Ordering::Relaxed),
+            total_blocks_found: self.blocks_found.load(Ordering::Relaxed),
+            total_uptime_secs: prior_uptime + self.uptime_secs(),
+        };
+        p.save();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -136,15 +136,17 @@ fn main() {
     }
 
     // Auto-use wallet address if worker is still the default placeholder
-    if config.stratum.worker.starts_with("YOUR_BITCOIN_ADDRESS") {
+    let needs_wallet = if config.stratum.worker.starts_with("YOUR_BITCOIN_ADDRESS") {
         if let Some(address) = mi_core::wallet::get_wallet_address() {
             eprintln!("Using wallet address: {address}");
             config.stratum.worker = format!("{address}.mi-miner");
+            false
         } else {
-            eprintln!("Warning: No Bitcoin address configured and no wallet found.");
-            eprintln!("Run `mi-miner --generate-wallet` to create one, or set [stratum].worker in config.\n");
+            true
         }
-    }
+    } else {
+        false
+    };
 
     if cli.benchmark {
         mi_mining::run_benchmark(10, config.mining.threads, cli.full);
@@ -167,10 +169,10 @@ fn main() {
         .build()
         .expect("Failed to create tokio runtime");
 
-    rt.block_on(run(config));
+    rt.block_on(run(config, needs_wallet));
 }
 
-async fn run(config: MinerConfig) {
+async fn run(config: MinerConfig, needs_wallet: bool) {
     tracing::info!("mi-miner v0.1.0 starting");
     tracing::info!("CPU threads: {}", config.mining.threads);
     tracing::info!("GPU enabled: {}", config.gpu.enabled);
@@ -254,8 +256,19 @@ async fn run(config: MinerConfig) {
         ))
     };
 
-    // Stratum client
-    if !config.stratum.url.is_empty() {
+    // Stratum client — only connect if we have a valid wallet/address
+    if needs_wallet {
+        tracing::warn!("No Bitcoin wallet configured — mining is paused");
+        tracing::info!("Open http://{} to create a wallet and start mining", config.web.bind);
+        eprintln!();
+        eprintln!("  No wallet configured. Open the dashboard to get started:");
+        eprintln!();
+        eprintln!("    http://{}", config.web.bind);
+        eprintln!();
+        eprintln!("  Create a wallet in the browser, then restart the miner.");
+        eprintln!();
+        stats.paused.store(true, Ordering::Relaxed);
+    } else if !config.stratum.url.is_empty() {
         let client = mi_network::StratumClient::new(
             &config.stratum.url,
             &config.stratum.worker,

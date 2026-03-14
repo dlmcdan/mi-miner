@@ -12,7 +12,7 @@ use tokio_stream::StreamExt;
 pub async fn stats_stream(
     State(stats): State<Arc<MiningStats>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = IntervalStream::new(tokio::time::interval(Duration::from_secs(1))).map(
+    let stream = IntervalStream::new(tokio::time::interval(Duration::from_secs(2))).map(
         move |_| {
             let snapshot = stats.snapshot();
             let json = serde_json::to_string(&snapshot).unwrap_or_default();

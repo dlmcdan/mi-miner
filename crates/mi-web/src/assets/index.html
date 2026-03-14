@@ -780,29 +780,74 @@ function fmtTime(s) {
   return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
 }
 
+/* --- Cached DOM refs + previous values to skip redundant updates --- */
+var domCache = {};
+function el(id) {
+  if (!domCache[id]) domCache[id] = document.getElementById(id);
+  return domCache[id];
+}
+var prevVals = {};
+function setText(id, val) {
+  if (prevVals[id] !== val) { el(id).textContent = val; prevVals[id] = val; }
+}
+var lastProbHashrate = 0;
+var lastControlState = '';
+var lastActivity = null;
+
 function startSSE() {
   var es = new EventSource('/events');
-  es.onopen = function(){ document.getElementById('conn-dot').className='status on'; document.getElementById('connection').innerHTML='<span class="status on"></span>Connected'; };
-  es.onerror = function(){ document.getElementById('conn-dot').className='status off'; document.getElementById('connection').innerHTML='<span class="status off"></span>Disconnected — retrying...'; };
+  es.onopen = function(){ el('conn-dot').className='status on'; el('connection').textContent='Connected'; };
+  es.onerror = function(){ el('conn-dot').className='status off'; el('connection').textContent='Disconnected — retrying...'; };
   es.onmessage = function(e) {
     var d = JSON.parse(e.data);
-    document.getElementById('hashrate').textContent = fmtHash(d.combined_hashrate);
-    document.getElementById('cpu-hashrate').textContent = fmtHash(d.cpu_hashrate);
-    document.getElementById('gpu-hashrate').textContent = fmtHash(d.gpu_hashrate);
-    document.getElementById('threads').textContent = d.cpu_threads;
-    document.getElementById('gpu-intensity').textContent = d.gpu_intensity_pct+'%';
-    document.getElementById('gpu-bar').style.width = d.gpu_intensity_pct+'%';
-    document.getElementById('total-hashes').textContent = fmtBig(d.total_hashes);
-    document.getElementById('shares').textContent = d.shares_submitted;
-    document.getElementById('accepted').textContent = d.shares_accepted;
-    document.getElementById('rejected').textContent = d.shares_rejected;
-    document.getElementById('blocks').textContent = d.blocks_found;
-    document.getElementById('activity').innerHTML = d.is_user_active ? '<span class="active">Active</span>' : '<span class="idle">Idle</span>';
-    document.getElementById('idle-time').textContent = fmtTime(d.idle_secs);
-    document.getElementById('uptime').textContent = fmtTime(d.uptime_secs);
-    document.getElementById('sys-threads').textContent = d.cpu_threads + ' active';
-    updateControlState(d.paused ? 'paused' : 'running');
-    updateProbTable(d.combined_hashrate);
+
+    // Batch all DOM writes in a single animation frame
+    requestAnimationFrame(function() {
+      setText('hashrate', fmtHash(d.combined_hashrate));
+      setText('cpu-hashrate', fmtHash(d.cpu_hashrate));
+      setText('gpu-hashrate', fmtHash(d.gpu_hashrate));
+      setText('threads', String(d.cpu_threads));
+      setText('gpu-intensity', d.gpu_intensity_pct+'%');
+      setText('total-hashes', fmtBig(d.total_hashes));
+      setText('shares', String(d.shares_submitted));
+      setText('accepted', String(d.shares_accepted));
+      setText('rejected', String(d.shares_rejected));
+      setText('blocks', String(d.blocks_found));
+      setText('idle-time', fmtTime(d.idle_secs));
+      setText('uptime', fmtTime(d.uptime_secs));
+      setText('sys-threads', d.cpu_threads + ' active');
+
+      // GPU bar — only update style if changed
+      var gpuW = d.gpu_intensity_pct+'%';
+      if (prevVals['gpu-bar'] !== gpuW) {
+        el('gpu-bar').style.width = gpuW;
+        prevVals['gpu-bar'] = gpuW;
+      }
+
+      // Activity — only update if changed
+      if (lastActivity !== d.is_user_active) {
+        el('activity').textContent = d.is_user_active ? 'Active' : 'Idle';
+        el('activity').className = d.is_user_active ? 'active' : 'idle';
+        lastActivity = d.is_user_active;
+      }
+
+      // Controls — only update if state changed
+      var ctrlState = d.paused ? 'paused' : 'running';
+      if (lastControlState !== ctrlState) {
+        updateControlState(ctrlState);
+        lastControlState = ctrlState;
+      }
+
+      // Probability — only recalculate if hashrate changed >2%
+      var hr = d.combined_hashrate;
+      if (hr > 0 && (lastProbHashrate === 0 || Math.abs(hr - lastProbHashrate) / lastProbHashrate > 0.02)) {
+        updateProbTable(hr);
+        lastProbHashrate = hr;
+      } else if (hr === 0 && lastProbHashrate !== 0) {
+        updateProbTable(0);
+        lastProbHashrate = 0;
+      }
+    });
   };
 }
 </script>

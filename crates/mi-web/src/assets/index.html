@@ -301,6 +301,12 @@
   </div>
 </div>
 
+<!-- Hashrate Timeline -->
+<div class="card" style="margin-top:4px;margin-bottom:4px">
+  <h2 title="Rolling history of combined hashrate over the last 5 minutes">Hashrate Timeline</h2>
+  <canvas id="hashrate-chart" style="width:100%;height:160px"></canvas>
+</div>
+
 <!-- Block Probability -->
 <div class="card" style="margin-top:4px">
   <h2 title="Statistical estimate of how long you'd need to mine continuously at current hashrate to find a Bitcoin block">Expected Time to Find a Block</h2>
@@ -489,6 +495,7 @@ function showDashboard() {
   loadConfig();
   loadHardware();
   loadOptimizationWarnings();
+  initChart();
 }
 
 /* ========== Tabs ========== */
@@ -833,6 +840,106 @@ function fmtTime(s) {
   return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
 }
 
+/* ========== Hashrate Chart ========== */
+var chartData = [];
+var CHART_MAX_POINTS = 150; // 5 minutes at 2s intervals
+var chartCanvas = null;
+var chartCtx = null;
+
+function initChart() {
+  chartCanvas = document.getElementById('hashrate-chart');
+  if (!chartCanvas) return;
+  // Set canvas resolution to match display size
+  var rect = chartCanvas.getBoundingClientRect();
+  chartCanvas.width = rect.width * (window.devicePixelRatio || 1);
+  chartCanvas.height = rect.height * (window.devicePixelRatio || 1);
+  chartCtx = chartCanvas.getContext('2d');
+  chartCtx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+}
+
+function pushChartPoint(hashrate) {
+  chartData.push({ time: Date.now(), value: hashrate });
+  if (chartData.length > CHART_MAX_POINTS) chartData.shift();
+}
+
+function drawChart() {
+  if (!chartCtx || chartData.length < 2) return;
+  var w = chartCanvas.getBoundingClientRect().width;
+  var h = chartCanvas.getBoundingClientRect().height;
+  var ctx = chartCtx;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Find max value for scaling
+  var maxVal = 0;
+  for (var i = 0; i < chartData.length; i++) {
+    if (chartData[i].value > maxVal) maxVal = chartData[i].value;
+  }
+  if (maxVal === 0) maxVal = 1;
+  maxVal *= 1.15; // 15% headroom
+
+  var padL = 60, padR = 10, padT = 10, padB = 24;
+  var plotW = w - padL - padR;
+  var plotH = h - padT - padB;
+
+  // Grid lines + Y labels
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 0.5;
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'right';
+  for (var g = 0; g <= 4; g++) {
+    var gy = padT + plotH * (1 - g / 4);
+    ctx.beginPath();
+    ctx.moveTo(padL, gy);
+    ctx.lineTo(w - padR, gy);
+    ctx.stroke();
+    var gv = maxVal * g / 4;
+    ctx.fillText(fmtHashShort(gv), padL - 6, gy + 3);
+  }
+
+  // X-axis time labels
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#8b949e';
+  var now = Date.now();
+  for (var t = 0; t <= 4; t++) {
+    var tx = padL + plotW * t / 4;
+    var secsAgo = Math.round((CHART_MAX_POINTS - CHART_MAX_POINTS * t / 4) * 2);
+    ctx.fillText(secsAgo > 0 ? '-' + fmtTimeSec(secsAgo) : 'now', tx, h - 4);
+  }
+
+  // Line
+  ctx.strokeStyle = '#f7931a';
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (var i = 0; i < chartData.length; i++) {
+    var x = padL + (i / (CHART_MAX_POINTS - 1)) * plotW;
+    var y = padT + plotH * (1 - chartData[i].value / maxVal);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Fill under line
+  ctx.lineTo(padL + ((chartData.length - 1) / (CHART_MAX_POINTS - 1)) * plotW, padT + plotH);
+  ctx.lineTo(padL, padT + plotH);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(247, 147, 26, 0.08)';
+  ctx.fill();
+}
+
+function fmtHashShort(h) {
+  if (h >= 1e9) return (h/1e9).toFixed(1) + 'G';
+  if (h >= 1e6) return (h/1e6).toFixed(1) + 'M';
+  if (h >= 1e3) return (h/1e3).toFixed(0) + 'K';
+  return Math.round(h).toString();
+}
+
+function fmtTimeSec(s) {
+  if (s >= 60) return Math.floor(s/60) + 'm';
+  return s + 's';
+}
+
 /* --- Cached DOM refs + previous values to skip redundant updates --- */
 var domCache = {};
 function el(id) {
@@ -863,6 +970,8 @@ function startSSE() {
       setText('hashrate', fmtHash(hr));
       setText('cpu-hashrate', fmtHash(cpuHr));
       setText('gpu-hashrate', fmtHash(gpuHr));
+      pushChartPoint(hr);
+      drawChart();
       setText('threads', String(d.cpu_threads));
       setText('gpu-intensity', d.gpu_intensity_pct+'%');
       setText('total-hashes', fmtBig(d.total_hashes));

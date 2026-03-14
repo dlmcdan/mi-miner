@@ -206,12 +206,8 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         None
     };
 
-    // Channels for share submission and work broadcast
+    // Channels for share submission
     let (submit_tx, submit_rx) = tokio::sync::mpsc::channel(64);
-    let (work_tx, _work_rx) = tokio::sync::broadcast::channel::<(
-        mi_mining::worker::Work,
-        mi_mining::block::BlockTemplate,
-    )>(16);
 
     // CPU mining pool
     let submit_tx_mining = submit_tx.clone();
@@ -235,9 +231,13 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         None
     };
 
-    // Work distribution callback for stratum
+    // Channel to send work from stratum callback (async) to pool feeder (sync)
+    let (pool_work_tx, pool_work_rx) =
+        std::sync::mpsc::sync_channel::<mi_mining::worker::Work>(4);
+
+    // Work distribution callback for stratum — sends directly to pool feeder
     let on_work: Arc<mi_network::stratum::client::WorkCallback> = {
-        let work_tx = work_tx.clone();
+        let pool_work_tx = pool_work_tx.clone();
         Arc::new(Box::new(
             move |template: mi_mining::block::BlockTemplate, target: [u8; 32]| {
                 let (_header, header_bytes) = template.build_header(0);
@@ -251,10 +251,49 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                     extranonce: 0,
                 };
 
-                let _ = work_tx.send((work, template));
+                tracing::info!(job = template.job_id, "Distributing work to CPU pool");
+                let _ = pool_work_tx.send(work);
             },
         ))
     };
+
+    // Pool feeder thread — receives work and submits to the mining pool
+    if let Some(ref pool) = mining_pool {
+        let pool_stats = stats.clone();
+        // We need a way to submit work to the pool from the feeder thread.
+        // The pool's submit_work takes &self, so we clone the work sender.
+        let work_sender = pool.work_sender();
+        std::thread::Builder::new()
+            .name("pool-feeder".to_string())
+            .spawn(move || {
+                while let Ok(work) = pool_work_rx.recv() {
+                    if pool_stats.should_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    // Send work chunks directly to workers via the pool's channel
+                    let total_nonces = work.nonce_end.saturating_sub(work.nonce_start).max(1) as u64;
+                    // Split into chunks of ~100M nonces each for good granularity
+                    let chunk_size = 100_000_000u64;
+                    let mut start = work.nonce_start;
+                    while (start as u64) < work.nonce_end as u64 {
+                        let end = ((start as u64) + chunk_size).min(work.nonce_end as u64) as u32;
+                        let chunk = mi_mining::worker::Work {
+                            header: work.header,
+                            target: work.target,
+                            nonce_start: start,
+                            nonce_end: end,
+                            job_id: work.job_id.clone(),
+                            extranonce: work.extranonce,
+                        };
+                        if work_sender.send(chunk).is_err() {
+                            break;
+                        }
+                        start = end;
+                    }
+                }
+            })
+            .ok();
+    }
 
     // Stratum client — only connect if we have a valid wallet/address
     if needs_wallet {
@@ -279,16 +318,6 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         tokio::spawn(async move {
             if let Err(e) = client.run(on_work, submit_rx).await {
                 tracing::error!("Stratum client error: {e}");
-            }
-        });
-    }
-
-    // Feed broadcast work to CPU mining pool
-    if mining_pool.is_some() {
-        let mut work_rx = work_tx.subscribe();
-        tokio::spawn(async move {
-            while let Ok((_work, _template)) = work_rx.recv().await {
-                tracing::debug!("Work distributed to CPU pool");
             }
         });
     }

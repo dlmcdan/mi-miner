@@ -28,18 +28,11 @@ Solo mining at consumer hashrates is a lottery. The odds of finding a block are 
 # One-time setup (installs Rust if needed, builds, generates config)
 ./scripts/setup.sh
 
-# Start mining
-./scripts/run.sh
+# Build and start mining
+./scripts/dev.sh
 ```
 
 Open `http://127.0.0.1:7878` in your browser. On first visit, the dashboard walks you through wallet creation.
-
-Or manually:
-
-```bash
-cargo build --release
-./target/release/mi-miner
-```
 
 ## Requirements
 
@@ -236,8 +229,10 @@ Results are saved to `~/.mi-miner/benchmarks/` with timestamps.
 
 | Script | Description |
 |--------|-------------|
+| `./scripts/dev.sh` | Stop running instance, build, and start (primary dev workflow) |
 | `./scripts/setup.sh` | First-time setup: installs Rust, checks Xcode, builds, generates config |
-| `./scripts/run.sh` | Builds if needed, starts the miner |
+| `./scripts/run.sh` | Starts the miner (builds if binary missing) |
+| `./scripts/stop.sh` | Stop a running instance |
 | `./scripts/build.sh` | Release build |
 | `./scripts/test.sh` | Run all tests |
 | `./scripts/benchmark.sh` | Quick benchmark (use `--full` for complete suite) |

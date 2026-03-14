@@ -52,6 +52,11 @@ impl MiningPool {
         }
     }
 
+    /// Get a clone of the work sender channel for external use.
+    pub fn work_sender(&self) -> Sender<Work> {
+        self.work_tx.clone()
+    }
+
     /// Submit work to the pool. Distributes nonce ranges across workers.
     pub fn submit_work(&self, work: Work) {
         let total_nonces = work

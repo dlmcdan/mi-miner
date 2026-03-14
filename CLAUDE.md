@@ -9,13 +9,20 @@ mi-miner — Solo Bitcoin miner in Rust with Metal GPU acceleration. Targets App
 ## Build & Development
 
 ```bash
+./scripts/dev.sh             # Stop running instance, build, and start (primary dev workflow)
+./scripts/build.sh           # Build only
+./scripts/run.sh             # Start (builds if binary missing)
+./scripts/stop.sh            # Stop a running instance
+./scripts/test.sh            # Run all tests (118 tests across crates)
+./scripts/benchmark.sh       # CPU benchmark (--full for complete suite)
+./scripts/setup.sh           # First-time setup (installs Rust, checks Xcode, builds)
+```
+
+Direct cargo commands:
+```bash
 cargo build --release        # Build optimized binary
-cargo test --workspace       # Run all tests (10 tests across crates)
+cargo test --workspace       # Run all tests
 cargo check                  # Quick type-check
-./target/release/mi-miner --help           # CLI help
-./target/release/mi-miner --generate-config  # Create ~/.mi-miner/config.toml
-./target/release/mi-miner --benchmark      # CPU benchmark (10s)
-./target/release/mi-miner --benchmark --full  # Full benchmark suite
 ```
 
 **GPU shader compilation** requires full Xcode (not just command line tools). Without Xcode, the binary builds but GPU mining is disabled at runtime. Install Xcode and ensure `xcrun -sdk macosx metal` works.
@@ -24,16 +31,18 @@ cargo check                  # Quick type-check
 
 6-crate Cargo workspace:
 
-- **mi-core** — Config (TOML), errors (thiserror), shared stats (atomics), Bitcoin primitives (SHA-256d, midstate, merkle root, target)
+- **mi-core** — Config (TOML), errors (thiserror), shared stats (atomics), Bitcoin primitives (SHA-256d, midstate, merkle root, target), BIP39 wallet generation, hardware auto-detection
 - **mi-mining** — CPU SHA-256d engine using `sha2` crate (ARM SHA2 HW accel), thread pool with dynamic scaling, midstate optimization, benchmarking
 - **mi-gpu** — Metal compute shader GPU mining engine (`shader.metal`), pipeline/dispatcher/manager, compiled via `build.rs`
 - **mi-network** — Stratum v1 client (async TCP, JSON-RPC, auto-reconnect), Bitcoin Core RPC client (placeholder)
 - **mi-activity** — User idle detection (macOS CGEventSource FFI, Linux evdev), system CPU monitoring (sysinfo), adaptive throttle logic
-- **mi-web** — Axum web dashboard with SSE live stats, embedded HTML (dark theme, <30KB), no JS build step
+- **mi-web** — Axum web dashboard with SSE live stats, wallet onboarding (generate or use existing), settings panel, mining controls (start/pause/resume/stop), connection test, benchmark, auto-configure
 
 Key patterns:
 - `MiningStats` is `Arc`-shared across all subsystems, uses atomics for lock-free updates
 - CPU mining uses OS threads (not tokio) via crossbeam channels — CPU-bound work
+- Work flows from stratum callback → sync channel → pool feeder thread → crossbeam channel → workers
 - Networking, web, and activity monitoring use tokio async runtime
 - GPU uses Metal compute shaders with unified memory (MTLResourceStorageModeShared)
 - Nonce space: GPU gets 90%, CPU gets 10%
+- If no wallet is configured, the miner starts paused with dashboard accessible for setup

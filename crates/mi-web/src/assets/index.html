@@ -540,24 +540,56 @@ function loadHardware() {
   });
 }
 
+var throttleTimeout = 0; // set from optimization check
+
 function loadOptimizationWarnings() {
   fetch('/api/optimization').then(function(r){return r.json()}).then(function(warnings) {
-    var el = document.getElementById('opt-warnings');
+    var container = document.getElementById('opt-warnings');
     if (!warnings || warnings.length === 0) {
-      el.innerHTML = '';
+      container.innerHTML = '';
       return;
     }
     var html = '';
     for (var i = 0; i < warnings.length; i++) {
       var w = warnings[i];
-      var icon = w.severity === 'high' ? '!!' : w.severity === 'medium' ? '!' : w.severity === 'info' ? 'i' : '~';
-      html += '<div class="opt-warn ' + w.severity + '">';
-      html += '<strong>' + w.message + '</strong>';
-      html += '<div class="fix">' + w.fix + '</div>';
-      html += '</div>';
+      // Check for throttle countdown marker
+      if (w.fix.indexOf('THROTTLE_COUNTDOWN:') === 0) {
+        throttleTimeout = parseInt(w.fix.split(':')[1]) || 120;
+        html += '<div class="opt-warn ' + w.severity + '" id="throttle-banner">';
+        html += '<strong>' + w.message + '</strong>';
+        html += '<div class="fix" id="throttle-countdown"></div>';
+        html += '</div>';
+      } else {
+        html += '<div class="opt-warn ' + w.severity + '">';
+        html += '<strong>' + w.message + '</strong>';
+        html += '<div class="fix">' + w.fix + '</div>';
+        html += '</div>';
+      }
     }
-    el.innerHTML = html;
+    container.innerHTML = html;
   });
+}
+
+function updateThrottleBanner(idleSecs, isActive) {
+  var el = document.getElementById('throttle-countdown');
+  if (!el || throttleTimeout === 0) return;
+
+  if (!isActive) {
+    el.textContent = 'User idle. Running at full speed.';
+    el.style.color = 'var(--green)';
+  } else {
+    var remaining = Math.max(0, throttleTimeout - idleSecs);
+    if (remaining === 0) {
+      el.textContent = 'Ramping up to full speed...';
+      el.style.color = 'var(--green)';
+    } else {
+      var mins = Math.floor(remaining / 60);
+      var secs = Math.floor(remaining % 60);
+      var timeStr = mins > 0 ? mins + 'm ' + secs + 's' : secs + 's';
+      el.textContent = 'Throttled — full speed in ' + timeStr + '. Disable in Settings for constant max hashrate.';
+      el.style.color = '';
+    }
+  }
 }
 
 /* ========== Block Probability ========== */
@@ -837,6 +869,9 @@ function startSSE() {
         updateControlState(ctrlState);
         lastControlState = ctrlState;
       }
+
+      // Throttle countdown
+      updateThrottleBanner(d.idle_secs, d.is_user_active);
 
       // Probability — only recalculate if hashrate changed >2%
       var hr = d.combined_hashrate;

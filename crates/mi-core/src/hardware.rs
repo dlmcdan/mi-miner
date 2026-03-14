@@ -201,10 +201,13 @@ pub fn check_optimization(config: &crate::config::MinerConfig) -> Vec<Optimizati
         warnings.push(OptimizationWarning {
             severity: Severity::Info,
             message: format!(
-                "Activity throttling is on. Mining will drop to {} thread(s) when you're using the computer.",
-                config.activity.min_threads
+                "Activity throttling is on (idle timeout: {}s). Mining drops to {} thread(s) when you're active.",
+                config.activity.idle_timeout_secs, config.activity.min_threads
             ),
-            fix: "This is normal. Mining ramps back up after idle timeout. Disable in Settings if you want constant full speed.".to_string(),
+            fix: format!(
+                "THROTTLE_COUNTDOWN:{}",
+                config.activity.idle_timeout_secs
+            ),
         });
     }
 

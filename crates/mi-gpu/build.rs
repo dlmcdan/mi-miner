@@ -8,8 +8,13 @@ fn main() {
         return;
     }
 
+    // Always re-run: check if Metal tools become available between builds
+    println!("cargo:rerun-if-changed=src/shader.metal");
+    println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let shader_src = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/shader.metal");
+    let shader_src =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/shader.metal");
 
     if !shader_src.exists() {
         println!("cargo:warning=shader.metal not found, GPU mining will be unavailable");
@@ -58,7 +63,6 @@ fn main() {
                 "cargo:rustc-env=MI_METALLIB_PATH={}",
                 metallib_path.display()
             );
-            println!("cargo:rerun-if-changed=src/shader.metal");
         }
         _ => {
             println!("cargo:warning=Metal library linking failed (xcrun metallib). GPU mining will be unavailable at runtime.");

@@ -159,6 +159,21 @@
   .test-result.fail { border-color: var(--red); color: var(--red); }
   .test-result .detail { color: var(--dim); margin-top: 4px; }
   .restart-note { color: var(--dim); font-size: 0.75em; font-style: italic; }
+
+  /* Optimization warnings */
+  .opt-warnings { margin-bottom: 16px; }
+  .opt-warn {
+    padding: 10px 14px; border-radius: 6px; margin-bottom: 8px;
+    font-size: 0.85em; line-height: 1.5;
+  }
+  .opt-warn .fix { color: var(--dim); margin-top: 2px; }
+  .opt-warn.high { background: #3d1214; border: 1px solid var(--red); color: var(--red); }
+  .opt-warn.high .fix { color: #f8514988; }
+  .opt-warn.medium { background: #2d1b00; border: 1px solid var(--accent); color: var(--accent); }
+  .opt-warn.medium .fix { color: #f7931a88; }
+  .opt-warn.low { background: #0c2d6b22; border: 1px solid var(--blue); color: var(--blue); }
+  .opt-warn.low .fix { color: #58a6ff88; }
+  .opt-warn.info { background: var(--surface); border: 1px solid var(--border); color: var(--dim); }
 </style>
 </head>
 <body>
@@ -240,6 +255,9 @@
   <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()">Resume</button>
   <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()">Stop</button>
 </div>
+
+<!-- Optimization Warnings -->
+<div id="opt-warnings" class="opt-warnings"></div>
 
 <!-- System Info -->
 <div class="card" style="margin-bottom:16px">
@@ -449,6 +467,7 @@ function showDashboard() {
   startSSE();
   loadConfig();
   loadHardware();
+  loadOptimizationWarnings();
 }
 
 /* ========== Tabs ========== */
@@ -518,6 +537,26 @@ function loadHardware() {
     document.getElementById('sys-gpu-status').innerHTML = hw.gpu_available
       ? '<span class="active">Enabled</span>'
       : '<span style="color:var(--dim)">Unavailable</span>';
+  });
+}
+
+function loadOptimizationWarnings() {
+  fetch('/api/optimization').then(function(r){return r.json()}).then(function(warnings) {
+    var el = document.getElementById('opt-warnings');
+    if (!warnings || warnings.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < warnings.length; i++) {
+      var w = warnings[i];
+      var icon = w.severity === 'high' ? '!!' : w.severity === 'medium' ? '!' : w.severity === 'info' ? 'i' : '~';
+      html += '<div class="opt-warn ' + w.severity + '">';
+      html += '<strong>' + w.message + '</strong>';
+      html += '<div class="fix">' + w.fix + '</div>';
+      html += '</div>';
+    }
+    el.innerHTML = html;
   });
 }
 

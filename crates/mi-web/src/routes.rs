@@ -160,6 +160,18 @@ pub async fn mining_stop(State(stats): State<AppState>) -> Json<ControlResponse>
     })
 }
 
+// ── Optimization Check ──
+
+pub async fn optimization_check() -> Json<Vec<mi_core::hardware::OptimizationWarning>> {
+    let path = MinerConfig::default_path();
+    let config = if path.exists() {
+        MinerConfig::load(&path).unwrap_or_default()
+    } else {
+        MinerConfig::default()
+    };
+    Json(mi_core::hardware::check_optimization(&config))
+}
+
 // ── Configuration ──
 
 #[derive(Serialize)]

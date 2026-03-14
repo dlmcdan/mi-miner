@@ -20,6 +20,7 @@ pub async fn start_server(
         .route("/api/config", axum::routing::get(routes::config_get))
         .route("/api/config", axum::routing::post(routes::config_save))
         .route("/api/hardware", axum::routing::get(routes::hardware_info))
+        .route("/api/optimization", axum::routing::get(routes::optimization_check))
         .route("/api/config/auto", axum::routing::post(routes::auto_configure))
         .route("/api/test/connection", axum::routing::post(routes::test_connection))
         .route("/api/test/benchmark", axum::routing::post(routes::test_benchmark))

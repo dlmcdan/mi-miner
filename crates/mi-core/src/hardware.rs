@@ -119,6 +119,105 @@ fn detect_gpu() -> (bool, Option<String>) {
     }
 }
 
+/// Check current config against detected hardware and return optimization warnings.
+pub fn check_optimization(config: &crate::config::MinerConfig) -> Vec<OptimizationWarning> {
+    let hw = detect();
+    let mut warnings = Vec::new();
+
+    // GPU available but not enabled
+    if hw.gpu_available && !config.gpu.enabled {
+        warnings.push(OptimizationWarning {
+            severity: Severity::High,
+            message: "GPU mining is disabled but your GPU supports Metal compute shaders.".to_string(),
+            fix: "Enable GPU in Settings or run Auto Configure. GPU can provide 100x+ more hashrate than CPU alone.".to_string(),
+        });
+    }
+
+    // GPU hardware present but shader not compiled
+    if !hw.gpu_available && hw.gpu_name.is_some() {
+        warnings.push(OptimizationWarning {
+            severity: Severity::High,
+            message: format!(
+                "GPU detected ({}) but Metal shader is not compiled.",
+                hw.gpu_name.as_deref().unwrap_or("unknown")
+            ),
+            fix: "Install Xcode from the App Store and rebuild: ./scripts/dev.sh".to_string(),
+        });
+    }
+
+    // Using fewer threads than available P-cores
+    if config.mining.threads < hw.cpu_cores_performance && !config.mining.gpu_only {
+        warnings.push(OptimizationWarning {
+            severity: Severity::Medium,
+            message: format!(
+                "Using {} CPU threads but {} performance cores are available.",
+                config.mining.threads, hw.cpu_cores_performance
+            ),
+            fix: format!(
+                "Increase mining threads to {} in Settings for maximum CPU hashrate.",
+                hw.cpu_cores_performance
+            ),
+        });
+    }
+
+    // Using more threads than P-cores (E-cores are slower, diminishing returns)
+    if config.mining.threads > hw.cpu_cores_performance && hw.cpu_cores_performance < hw.cpu_cores_total {
+        warnings.push(OptimizationWarning {
+            severity: Severity::Low,
+            message: format!(
+                "Using {} threads but only {} are performance cores. Extra threads use slower efficiency cores.",
+                config.mining.threads, hw.cpu_cores_performance
+            ),
+            fix: format!(
+                "Consider reducing to {} threads. E-cores add little hashrate but increase power and heat.",
+                hw.cpu_cores_performance
+            ),
+        });
+    }
+
+    // GPU intensity not at max when GPU is enabled
+    if config.gpu.enabled && config.gpu.intensity < 0.9 {
+        warnings.push(OptimizationWarning {
+            severity: Severity::Low,
+            message: format!(
+                "GPU intensity is {:.0}%. Not running at full capacity.",
+                config.gpu.intensity * 100.0
+            ),
+            fix: "Set GPU intensity to 100% in Settings for maximum hashrate.".to_string(),
+        });
+    }
+
+    // Activity throttling will reduce hashrate when user is active
+    if config.activity.enabled && config.activity.min_threads < hw.cpu_cores_performance {
+        warnings.push(OptimizationWarning {
+            severity: Severity::Info,
+            message: format!(
+                "Activity throttling is on. Mining will drop to {} thread(s) when you're using the computer.",
+                config.activity.min_threads
+            ),
+            fix: "This is normal. Mining ramps back up after idle timeout. Disable in Settings if you want constant full speed.".to_string(),
+        });
+    }
+
+    warnings
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OptimizationWarning {
+    pub severity: Severity,
+    pub message: String,
+    pub fix: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    High,
+    Medium,
+    Low,
+    Info,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

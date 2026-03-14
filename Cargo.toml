@@ -14,7 +14,7 @@ name = "mi-miner"
 version = "0.1.0"
 edition = "2021"
 description = "Solo Bitcoin miner with Metal GPU acceleration"
-license = "MIT"
+license = "AGPL-3.0"
 
 [[bin]]
 name = "mi-miner"

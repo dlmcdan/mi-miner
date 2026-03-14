@@ -346,4 +346,4 @@ None of these files are tracked by git.
 
 ## License
 
-MIT
+AGPL-3.0 — see [LICENSE](LICENSE) for details.

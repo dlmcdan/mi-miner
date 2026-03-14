@@ -511,7 +511,7 @@ function loadHardware() {
     document.getElementById('hw-info').innerHTML = lines.join('<br>');
 
     // Mining tab system card
-    document.getElementById('sys-platform').textContent = hw.platform.charAt(0).toUpperCase() + hw.platform.slice(1);
+    document.getElementById('sys-platform').textContent = hw.platform === 'macos' ? 'MacOS' : hw.platform.charAt(0).toUpperCase() + hw.platform.slice(1);
     document.getElementById('sys-cpu').textContent = hw.cpu_cores_performance + ' P-cores / ' + hw.cpu_cores_total + ' total';
     document.getElementById('sys-gpu').textContent = hw.gpu_name || 'Unknown';
     document.getElementById('sys-mem').textContent = hw.memory_gb > 0 ? hw.memory_gb + ' GB' : '-';

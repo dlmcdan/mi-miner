@@ -291,7 +291,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                     }
 
                     // Check for new work
-                    if let Some((gen, work)) = shared_work.get_if_new(last_gen) {
+                    if let Some((gen, _work)) = shared_work.get_if_new(last_gen) {
                         last_gen = gen;
                         gpu_nonce = 0;
 

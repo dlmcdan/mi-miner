@@ -178,6 +178,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     tracing::info!("GPU enabled: {}", config.gpu.enabled);
 
     let stats = MiningStats::new();
+    let live_config = mi_core::LiveConfig::new(config.clone());
 
     let pid_path = mi_core::config::dirs_path().join("mi-miner.pid");
     let _ = std::fs::create_dir_all(mi_core::config::dirs_path());
@@ -305,7 +306,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
             });
 
         let monitor = mi_activity::ActivityMonitor::new(
-            config.activity.clone(),
+            live_config.clone(),
             stats.clone(),
             config.mining.threads,
         );
@@ -332,8 +333,9 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     if config.web.enabled {
         let bind = config.web.bind.clone();
         let stats_web = stats.clone();
+        let lc_web = live_config.clone();
         tokio::spawn(async move {
-            if let Err(e) = mi_web::start_server(&bind, stats_web).await {
+            if let Err(e) = mi_web::start_server(&bind, stats_web, lc_web).await {
                 tracing::error!("Web server error: {e}");
             }
         });

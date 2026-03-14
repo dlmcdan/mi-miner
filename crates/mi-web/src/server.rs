@@ -1,13 +1,19 @@
 use crate::routes;
 use crate::sse;
 use axum::Router;
-use mi_core::MiningStats;
+use mi_core::{LiveConfig, MiningStats};
 use std::sync::Arc;
 
 pub async fn start_server(
     bind: &str,
     stats: Arc<MiningStats>,
+    live_config: Arc<LiveConfig>,
 ) -> Result<(), mi_core::MiMinerError> {
+    let state = routes::AppState {
+        stats,
+        live_config,
+    };
+
     let app = Router::new()
         .route("/", axum::routing::get(routes::index))
         .route("/api/stats", axum::routing::get(routes::stats_json))
@@ -25,7 +31,7 @@ pub async fn start_server(
         .route("/api/test/connection", axum::routing::post(routes::test_connection))
         .route("/api/test/benchmark", axum::routing::post(routes::test_benchmark))
         .route("/events", axum::routing::get(sse::stats_stream))
-        .with_state(stats);
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await

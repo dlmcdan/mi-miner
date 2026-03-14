@@ -3,19 +3,23 @@ use axum::response::Html;
 use axum::Json;
 use mi_core::config::MinerConfig;
 use mi_core::stats::StatsSnapshot;
-use mi_core::MiningStats;
+use mi_core::{LiveConfig, MiningStats};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-pub type AppState = Arc<MiningStats>;
+#[derive(Clone)]
+pub struct AppState {
+    pub stats: Arc<MiningStats>,
+    pub live_config: Arc<LiveConfig>,
+}
 
 pub async fn index() -> Html<&'static str> {
     Html(include_str!("assets/index.html"))
 }
 
-pub async fn stats_json(State(stats): State<AppState>) -> Json<StatsSnapshot> {
-    Json(stats.snapshot())
+pub async fn stats_json(State(state): State<AppState>) -> Json<StatsSnapshot> {
+    Json(state.stats.snapshot())
 }
 
 // ── Wallet ──
@@ -133,8 +137,8 @@ pub struct ControlResponse {
     pub state: String,
 }
 
-pub async fn mining_pause(State(stats): State<AppState>) -> Json<ControlResponse> {
-    stats.paused.store(true, Ordering::Relaxed);
+pub async fn mining_pause(State(state): State<AppState>) -> Json<ControlResponse> {
+    state.stats.paused.store(true, Ordering::Relaxed);
     tracing::info!("Mining paused via dashboard");
     Json(ControlResponse {
         success: true,
@@ -142,8 +146,8 @@ pub async fn mining_pause(State(stats): State<AppState>) -> Json<ControlResponse
     })
 }
 
-pub async fn mining_resume(State(stats): State<AppState>) -> Json<ControlResponse> {
-    stats.paused.store(false, Ordering::Relaxed);
+pub async fn mining_resume(State(state): State<AppState>) -> Json<ControlResponse> {
+    state.stats.paused.store(false, Ordering::Relaxed);
     tracing::info!("Mining resumed via dashboard");
     Json(ControlResponse {
         success: true,
@@ -151,9 +155,9 @@ pub async fn mining_resume(State(stats): State<AppState>) -> Json<ControlRespons
     })
 }
 
-pub async fn mining_stop(State(stats): State<AppState>) -> Json<ControlResponse> {
+pub async fn mining_stop(State(state): State<AppState>) -> Json<ControlResponse> {
     tracing::info!("Miner shutdown requested via dashboard");
-    stats.should_stop.store(true, Ordering::Relaxed);
+    state.stats.should_stop.store(true, Ordering::Relaxed);
     Json(ControlResponse {
         success: true,
         state: "stopping".to_string(),
@@ -256,23 +260,8 @@ impl ConfigData {
     }
 }
 
-pub async fn config_get() -> Json<ConfigResponse> {
-    let path = MinerConfig::default_path();
-    let config = if path.exists() {
-        match MinerConfig::load(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                return Json(ConfigResponse {
-                    success: false,
-                    config: None,
-                    error: Some(format!("Failed to load config: {e}")),
-                })
-            }
-        }
-    } else {
-        MinerConfig::default()
-    };
-
+pub async fn config_get(State(state): State<AppState>) -> Json<ConfigResponse> {
+    let config = state.live_config.snapshot();
     Json(ConfigResponse {
         success: true,
         config: Some(ConfigData::from(&config)),
@@ -280,19 +269,16 @@ pub async fn config_get() -> Json<ConfigResponse> {
     })
 }
 
-pub async fn config_save(Json(data): Json<ConfigData>) -> Json<ConfigResponse> {
-    let path = MinerConfig::default_path();
-    let mut config = if path.exists() {
-        MinerConfig::load(&path).unwrap_or_default()
-    } else {
-        MinerConfig::default()
-    };
-
+pub async fn config_save(
+    State(state): State<AppState>,
+    Json(data): Json<ConfigData>,
+) -> Json<ConfigResponse> {
+    let mut config = state.live_config.snapshot();
     data.apply_to(&mut config);
 
-    match config.save(&path) {
+    match state.live_config.update(config.clone()) {
         Ok(()) => {
-            tracing::info!("Config saved via dashboard");
+            tracing::info!("Config saved and applied live");
             Json(ConfigResponse {
                 success: true,
                 config: Some(ConfigData::from(&config)),

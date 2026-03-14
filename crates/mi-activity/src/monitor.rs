@@ -1,6 +1,6 @@
 use crate::platform;
 use crate::throttle::{compute_throttle, ThrottleState};
-use mi_core::config::ActivityConfig;
+use mi_core::LiveConfig;
 use mi_core::MiningStats;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -9,15 +9,15 @@ use tokio::sync::watch;
 
 /// Activity monitor that polls user input and system CPU, then broadcasts throttle decisions.
 pub struct ActivityMonitor {
-    config: ActivityConfig,
+    live_config: Arc<LiveConfig>,
     stats: Arc<MiningStats>,
     max_threads: usize,
 }
 
 impl ActivityMonitor {
-    pub fn new(config: ActivityConfig, stats: Arc<MiningStats>, max_threads: usize) -> Self {
+    pub fn new(live_config: Arc<LiveConfig>, stats: Arc<MiningStats>, max_threads: usize) -> Self {
         Self {
-            config,
+            live_config,
             stats,
             max_threads,
         }
@@ -44,23 +44,23 @@ impl ActivityMonitor {
                 break;
             }
 
-            // Get idle time
+            // Read current activity config (may have been updated via dashboard)
+            let config = self.live_config.activity();
+
             let idle_secs = platform::idle_seconds();
             self.stats
                 .idle_secs
                 .store(idle_secs as u64, Ordering::Relaxed);
 
-            let user_active = idle_secs < self.config.idle_timeout_secs as f64;
+            let user_active = idle_secs < config.idle_timeout_secs as f64;
             self.stats.is_user_active.store(user_active, Ordering::Relaxed);
 
-            // Get CPU usage (exclude our own mining threads)
             sys.refresh_cpu_usage();
             let cpu_usage: f32 = sys.cpus().iter().map(|c| c.cpu_usage()).sum::<f32>()
                 / sys.cpus().len().max(1) as f32;
 
-            // Compute throttle state
             let throttle =
-                compute_throttle(&self.config, idle_secs, cpu_usage, self.max_threads);
+                compute_throttle(&config, idle_secs, cpu_usage, self.max_threads);
 
             tracing::trace!(
                 idle_secs = idle_secs as u64,

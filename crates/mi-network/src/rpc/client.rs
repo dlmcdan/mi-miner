@@ -1,6 +1,7 @@
 use mi_core::MiMinerError;
 
 /// Bitcoin Core RPC client (placeholder — uses getblocktemplate for solo mining against own node).
+#[allow(dead_code)]
 pub struct RpcClient {
     url: String,
     user: String,

@@ -233,29 +233,22 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
 
     // Work distribution: stratum callback updates SharedWork, workers pick it up instantly
     let on_work: Arc<mi_network::stratum::client::WorkCallback> = {
-        let pool = mining_pool.as_ref();
-        let has_pool = pool.is_some();
-        // We need a way to call pool.submit_work from the callback.
-        // Use a channel to bridge async callback → sync pool.
         let (work_tx, work_rx) = std::sync::mpsc::sync_channel::<mi_mining::worker::Work>(2);
 
         if let Some(ref pool) = mining_pool {
-            let pool_submit = {
-                // Clone what we need for the feeder thread
-                let shared_work = pool.shared_work();
-                let stats = stats.clone();
-                std::thread::Builder::new()
-                    .name("work-updater".to_string())
-                    .spawn(move || {
-                        while let Ok(work) = work_rx.recv() {
-                            if stats.should_stop.load(Ordering::Relaxed) {
-                                break;
-                            }
-                            shared_work.update(work);
+            let shared_work = pool.shared_work();
+            let stats = stats.clone();
+            std::thread::Builder::new()
+                .name("work-updater".to_string())
+                .spawn(move || {
+                    while let Ok(work) = work_rx.recv() {
+                        if stats.should_stop.load(Ordering::Relaxed) {
+                            break;
                         }
-                    })
-                    .ok()
-            };
+                        shared_work.update(work);
+                    }
+                })
+                .ok();
         }
 
         Arc::new(Box::new(

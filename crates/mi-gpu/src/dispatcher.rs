@@ -5,7 +5,8 @@ use metal::*;
 pub struct GpuDispatcher {
     pipeline: MetalPipeline,
     buffers_a: MiningBuffers,
-    buffers_b: MiningBuffers,
+    #[allow(dead_code)]
+    buffers_b: MiningBuffers, // reserved for double-buffering
     batch_size: u64,
     threadgroup_size: u64,
 }
@@ -70,6 +71,7 @@ impl GpuDispatcher {
     }
 
     /// Update batch size.
+    #[allow(dead_code)]
     pub fn set_batch_size_log2(&mut self, log2: u32) {
         self.batch_size = 1u64 << log2;
     }

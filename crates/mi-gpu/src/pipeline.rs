@@ -50,6 +50,7 @@ impl MetalPipeline {
     }
 
     /// Initialize from embedded metallib bytes (compiled at build time).
+    #[allow(dead_code)]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let device = Device::system_default().ok_or("No Metal device found")?;
 
@@ -116,6 +117,7 @@ impl MetalPipeline {
 pub struct MiningBuffers {
     pub input: Buffer,
     pub output: Buffer,
+    #[allow(dead_code)]
     pub batch_size: u64,
 }
 

@@ -9,7 +9,6 @@ pub struct MiningPool {
     workers: Vec<JoinHandle<()>>,
     shared_work: Arc<SharedWork>,
     stats: Arc<MiningStats>,
-    on_found: Arc<FoundCallback>,
     current_thread_count: usize,
 }
 
@@ -45,7 +44,6 @@ impl MiningPool {
             workers,
             shared_work,
             stats,
-            on_found,
             current_thread_count: thread_count,
         }
     }

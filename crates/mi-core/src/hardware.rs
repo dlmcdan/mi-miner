@@ -76,16 +76,25 @@ fn detect_p_cores(total: usize) -> usize {
 fn detect_gpu() -> (bool, Option<String>) {
     #[cfg(target_os = "macos")]
     {
-        // Check if Metal shader was compiled (Xcode available)
-        let metallib_compiled = option_env!("MI_METALLIB_PATH").is_some();
+        // Check if Metal GPU mining is functional by looking for the compiled .metallib
+        // in the same places the GPU manager checks at runtime.
 
-        // Also check if we can find a metallib next to the binary
-        let metallib_exists = std::env::current_exe()
+        // 1. Check next to the binary
+        let metallib_next_to_exe = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.join("sha256d.metallib").exists()))
             .unwrap_or(false);
 
-        let available = metallib_compiled || metallib_exists;
+        // 2. Check if Metal tools are installed (can compile shaders on rebuild)
+        let metal_tools_available = std::process::Command::new("xcrun")
+            .args(["-sdk", "macosx", "metal", "-v"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        let available = metallib_next_to_exe || metal_tools_available;
 
         // Get GPU name via system_profiler
         let name = std::process::Command::new("system_profiler")

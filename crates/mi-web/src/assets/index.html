@@ -54,6 +54,12 @@
   }
   .btn:hover { opacity: 0.85; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary {
+    background: var(--surface); color: var(--dim); border: 1px solid var(--border);
+    padding: 10px 20px; font-family: inherit; font-size: 0.85em; border-radius: 6px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-secondary:hover { color: var(--text); border-color: var(--accent); }
   .mnemonic-box {
     background: var(--surface); border: 2px solid var(--accent);
     border-radius: 8px; padding: 24px; margin: 20px 0;
@@ -198,6 +204,7 @@
     <h2>Your Recovery Phrase</h2>
     <p>Write down these 12 words in order. This is the <strong>only way</strong> to recover your wallet.</p>
     <div class="mnemonic-box" id="mnemonic-words"></div>
+    <button class="btn-secondary" id="btn-copy-mnemonic" onclick="copyMnemonic()" style="margin-bottom:12px">Copy to Clipboard</button>
     <div class="warning"><strong>IMPORTANT</strong>Write these words down on paper and store them somewhere safe. If you lose them and find a block, the Bitcoin is gone forever. Do not share them with anyone.</div>
     <p>Your Bitcoin address:</p>
     <div class="address-box" id="wallet-address"></div>
@@ -337,6 +344,24 @@ fetch('/api/wallet').then(function(r){return r.json()}).then(function(d) {
 });
 
 /* ========== Setup Flow ========== */
+function copyMnemonic() {
+  var text = document.getElementById('mnemonic-words').textContent;
+  var btn = document.getElementById('btn-copy-mnemonic');
+  navigator.clipboard.writeText(text).then(function() {
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = 'Copy to Clipboard'; }, 2000);
+  }).catch(function() {
+    // Fallback for older browsers
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = 'Copy to Clipboard'; }, 2000);
+  });
+}
+
 function setExistingAddress() {
   var input = document.getElementById('existing-address');
   var errEl = document.getElementById('address-error');

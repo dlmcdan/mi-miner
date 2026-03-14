@@ -1,0 +1,15 @@
+[package]
+name = "mi-activity"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mi-core = { path = "../mi-core" }
+tokio = { version = "1", features = ["time", "sync"] }
+tracing = "0.1"
+sysinfo = "0.32"
+
+# macOS: uses CGEventSourceSecondsSinceLastEventType via direct FFI (no crate needed)
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.12"

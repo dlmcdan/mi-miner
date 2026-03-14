@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mi-miner Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --accent: #f7931a;
+    --green: #3fb950; --red: #f85149; --blue: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; padding: 20px;
+  }
+  h1 { color: var(--accent); font-size: 1.4em; margin-bottom: 0; }
+  h1 span { color: var(--dim); font-weight: normal; font-size: 0.7em; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin-bottom: 20px;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .card h2 { color: var(--dim); font-size: 0.75em; text-transform: uppercase;
+    letter-spacing: 0.1em; margin-bottom: 8px; }
+  .big { font-size: 2em; font-weight: bold; color: var(--accent); }
+  .medium { font-size: 1.2em; }
+  .row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .label { color: var(--dim); }
+  .active { color: var(--green); }
+  .idle { color: var(--blue); }
+  .bar-bg { background: var(--border); border-radius: 4px; height: 8px; margin-top: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #ffd700); transition: width 0.5s ease; }
+  .status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .status.on { background: var(--green); }
+  .status.off { background: var(--red); }
+  #connection { font-size: 0.8em; color: var(--dim); }
+  footer { margin-top: 30px; color: var(--dim); font-size: 0.75em; text-align: center; }
+
+  /* Setup / Onboarding */
+  .setup { max-width: 600px; margin: 60px auto; text-align: center; }
+  .setup h2 { color: var(--text); font-size: 1.2em; margin-bottom: 12px; }
+  .setup p { color: var(--dim); margin-bottom: 20px; line-height: 1.6; }
+  .btn {
+    background: var(--accent); color: #000; border: none; padding: 14px 32px;
+    font-family: inherit; font-size: 1em; font-weight: bold; border-radius: 6px;
+    cursor: pointer; transition: opacity 0.2s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .mnemonic-box {
+    background: var(--surface); border: 2px solid var(--accent);
+    border-radius: 8px; padding: 24px; margin: 20px 0;
+    font-size: 1.15em; line-height: 2; user-select: all; text-align: center;
+  }
+  .address-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px; margin: 12px 0;
+    font-size: 0.85em; word-break: break-all; color: var(--blue);
+  }
+  .warning {
+    background: #2d1b00; border: 1px solid #f7931a44;
+    border-radius: 6px; padding: 16px; margin: 20px 0;
+    color: var(--accent); font-size: 0.85em; line-height: 1.6; text-align: left;
+  }
+  .warning strong { display: block; margin-bottom: 4px; }
+  .step-indicator { color: var(--dim); font-size: 0.8em; margin-bottom: 24px; }
+  .hidden { display: none; }
+  .wallet-info {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 16px;
+    font-size: 0.8em; color: var(--dim);
+  }
+  .wallet-info span { color: var(--blue); }
+
+  /* Controls */
+  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+  .ctrl-btn {
+    font-family: inherit; font-size: 0.8em; font-weight: bold;
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 18px; cursor: pointer; transition: all 0.15s;
+  }
+  .ctrl-btn:hover { border-color: var(--text); }
+  .ctrl-btn.pause { background: var(--surface); color: var(--accent); border-color: var(--accent); }
+  .ctrl-btn.resume { background: var(--accent); color: #000; }
+  .ctrl-btn.stop { background: var(--surface); color: var(--red); border-color: var(--red); }
+  .ctrl-btn.stop:hover { background: var(--red); color: #fff; }
+  .ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .mining-state { font-size: 0.85em; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
+  .mining-state.running { color: var(--green); }
+  .mining-state.paused { color: var(--accent); }
+  .mining-state.stopped { color: var(--red); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; margin: 16px 0 20px 0; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 20px; cursor: pointer; color: var(--dim);
+    font-family: inherit; font-size: 0.85em; font-weight: bold;
+    border: none; background: none; border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Settings */
+  .settings { max-width: 700px; }
+  .settings-section { margin-bottom: 24px; }
+  .settings-section h3 {
+    color: var(--dim); font-size: 0.75em; text-transform: uppercase;
+    letter-spacing: 0.1em; margin-bottom: 12px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .field { display: flex; align-items: center; margin-bottom: 10px; gap: 12px; }
+  .field label { color: var(--dim); font-size: 0.85em; min-width: 180px; }
+  .field input[type="text"], .field input[type="number"], .field input[type="password"] {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; font-family: inherit; font-size: 0.85em; border-radius: 4px;
+    flex: 1; max-width: 300px;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); }
+  .field input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .field input[type="range"] { flex: 1; max-width: 200px; accent-color: var(--accent); }
+  .field .range-val { color: var(--text); font-size: 0.85em; min-width: 40px; }
+  .settings-actions { display: flex; gap: 10px; margin-top: 20px; align-items: center; }
+  .save-btn {
+    background: var(--accent); color: #000; border: none; padding: 10px 24px;
+    font-family: inherit; font-size: 0.85em; font-weight: bold; border-radius: 6px;
+    cursor: pointer;
+  }
+  .save-btn:hover { opacity: 0.85; }
+  .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .test-btn {
+    background: var(--surface); color: var(--blue); border: 1px solid var(--blue);
+    padding: 10px 20px; font-family: inherit; font-size: 0.85em; font-weight: bold;
+    border-radius: 6px; cursor: pointer;
+  }
+  .test-btn:hover { background: var(--blue); color: #000; }
+  .test-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .save-msg { font-size: 0.85em; margin-left: 8px; }
+  .save-msg.ok { color: var(--green); }
+  .save-msg.err { color: var(--red); }
+  .test-result {
+    margin-top: 8px; padding: 10px; border-radius: 4px; font-size: 0.85em;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .test-result.pass { border-color: var(--green); color: var(--green); }
+  .test-result.fail { border-color: var(--red); color: var(--red); }
+  .test-result .detail { color: var(--dim); margin-top: 4px; }
+  .restart-note { color: var(--dim); font-size: 0.75em; font-style: italic; }
+</style>
+</head>
+<body>
+
+<!-- ===== SETUP SCREEN ===== -->
+<div id="setup-screen" class="hidden">
+  <div id="step-welcome" class="setup">
+    <h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
+    <h2>Welcome</h2>
+    <p>To start mining, you need a Bitcoin wallet to receive any rewards.<br>We'll generate one for you right here.</p>
+    <button class="btn" onclick="generateWallet()">Generate Wallet</button>
+    <br><br>
+    <p style="font-size:0.8em">Already have a Bitcoin address? Set it in<br><code>~/.mi-miner/config.toml</code> under <code>[stratum].worker</code> and restart.</p>
+  </div>
+  <div id="step-mnemonic" class="setup hidden">
+    <h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
+    <div class="step-indicator">Step 1 of 2 &mdash; Save your recovery phrase</div>
+    <h2>Your Recovery Phrase</h2>
+    <p>Write down these 12 words in order. This is the <strong>only way</strong> to recover your wallet.</p>
+    <div class="mnemonic-box" id="mnemonic-words"></div>
+    <div class="warning"><strong>IMPORTANT</strong>Write these words down on paper and store them somewhere safe. If you lose them and find a block, the Bitcoin is gone forever. Do not share them with anyone.</div>
+    <p>Your Bitcoin address:</p>
+    <div class="address-box" id="wallet-address"></div>
+    <button class="btn" onclick="showConfirm()">I've Written Them Down</button>
+  </div>
+  <div id="step-confirm" class="setup hidden">
+    <h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
+    <div class="step-indicator">Step 2 of 2 &mdash; Confirm</div>
+    <h2>Confirm Your Backup</h2>
+    <p>To verify you saved your recovery phrase, enter word #<span id="confirm-word-num"></span>:</p>
+    <input type="text" id="confirm-input" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:12px;font-family:inherit;font-size:1em;border-radius:6px;width:200px;text-align:center;margin:16px 0;" placeholder="Enter word" onkeydown="if(event.key==='Enter')verifyWord()" autocomplete="off" spellcheck="false">
+    <br><button class="btn" onclick="verifyWord()">Verify &amp; Start Mining</button>
+    <p id="confirm-error" style="color:var(--red);margin-top:12px;" class="hidden">Incorrect word. Please check your backup and try again.</p>
+  </div>
+</div>
+
+<!-- ===== DASHBOARD ===== -->
+<div id="dashboard" class="hidden">
+<h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('mining')">Mining</button>
+  <button class="tab" onclick="switchTab('settings')">Settings</button>
+</div>
+
+<!-- Mining Tab -->
+<div id="tab-mining">
+<div id="wallet-bar" class="wallet-info hidden">Wallet: <span id="dash-address"></span></div>
+<div id="connection"><span class="status off" id="conn-dot"></span>Connecting...</div>
+<div class="controls" style="margin-top:12px">
+  <span class="mining-state running" id="mining-state">Running</span>
+  <button class="ctrl-btn pause" id="btn-pause" onclick="pauseMining()">Pause</button>
+  <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()">Resume</button>
+  <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()">Stop</button>
+</div>
+<div class="grid">
+  <div class="card"><h2>Combined Hashrate</h2><div class="big" id="hashrate">-</div></div>
+  <div class="card"><h2>CPU Hashrate</h2><div class="medium" id="cpu-hashrate">-</div><div class="row"><span class="label">Threads</span><span id="threads">-</span></div></div>
+  <div class="card"><h2>GPU Hashrate</h2><div class="medium" id="gpu-hashrate">-</div><div class="row"><span class="label">Intensity</span><span id="gpu-intensity">-</span></div><div class="bar-bg"><div class="bar-fill" id="gpu-bar" style="width:0%"></div></div></div>
+  <div class="card"><h2>Mining Stats</h2><div class="row"><span class="label">Total Hashes</span><span id="total-hashes">-</span></div><div class="row"><span class="label">Shares</span><span id="shares">-</span></div><div class="row"><span class="label">Accepted</span><span id="accepted" class="active">-</span></div><div class="row"><span class="label">Rejected</span><span id="rejected">-</span></div><div class="row"><span class="label">Blocks Found</span><span id="blocks" style="color:var(--accent)">-</span></div></div>
+  <div class="card"><h2>Activity</h2><div class="row"><span class="label">Status</span><span id="activity">-</span></div><div class="row"><span class="label">Idle Time</span><span id="idle-time">-</span></div><div class="row"><span class="label">Uptime</span><span id="uptime">-</span></div></div>
+</div>
+</div>
+
+<!-- Settings Tab -->
+<div id="tab-settings" class="hidden">
+<div class="settings">
+
+  <div class="settings-section">
+    <h3>Hardware Detection</h3>
+    <div id="hw-info" style="color:var(--dim);font-size:0.85em;margin-bottom:12px;">Detecting...</div>
+    <button class="test-btn" id="btn-auto-config" onclick="autoConfig()">Auto Configure</button>
+    <span class="save-msg" id="auto-msg"></span>
+    <div id="auto-result"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Mining</h3>
+    <div class="field"><label>CPU Threads</label><input type="number" id="cfg-threads" min="1" max="128"></div>
+    <div class="field"><label>CPU Only</label><input type="checkbox" id="cfg-cpu-only"></div>
+    <div class="field"><label>GPU Only</label><input type="checkbox" id="cfg-gpu-only"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3>GPU</h3>
+    <div class="field"><label>GPU Enabled</label><input type="checkbox" id="cfg-gpu-enabled"></div>
+    <div class="field"><label>GPU Intensity</label><input type="range" id="cfg-gpu-intensity" min="0" max="100" step="5"><span class="range-val" id="cfg-gpu-intensity-val">100%</span></div>
+    <div class="field"><label>Batch Size (log2)</label><input type="number" id="cfg-gpu-batch" min="18" max="28"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Stratum (Pool)</h3>
+    <div class="field"><label>URL</label><input type="text" id="cfg-stratum-url"></div>
+    <div class="field"><label>Worker</label><input type="text" id="cfg-stratum-worker"></div>
+    <div class="field"><label>Password</label><input type="password" id="cfg-stratum-pass"></div>
+    <button class="test-btn" id="btn-test-conn" onclick="testConnection()">Test Connection</button>
+    <div id="conn-result"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Activity Throttling</h3>
+    <div class="field"><label>Enabled</label><input type="checkbox" id="cfg-activity-enabled"></div>
+    <div class="field"><label>Idle Timeout (sec)</label><input type="number" id="cfg-idle-timeout" min="10" max="3600"></div>
+    <div class="field"><label>Min Threads (active)</label><input type="number" id="cfg-min-threads" min="0" max="128"></div>
+    <div class="field"><label>Min GPU Intensity (active)</label><input type="range" id="cfg-min-gpu" min="0" max="100" step="5"><span class="range-val" id="cfg-min-gpu-val">10%</span></div>
+    <div class="field"><label>Ramp Up (sec)</label><input type="number" id="cfg-ramp-up" min="0" max="300"></div>
+    <div class="field"><label>Ramp Down (sec)</label><input type="number" id="cfg-ramp-down" min="0" max="60"></div>
+    <div class="field"><label>CPU Threshold %</label><input type="number" id="cfg-cpu-thresh" min="0" max="100"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Web Dashboard</h3>
+    <div class="field"><label>Bind Address</label><input type="text" id="cfg-web-bind"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Logging</h3>
+    <div class="field"><label>Level</label>
+      <select id="cfg-log-level" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:0.85em;border-radius:4px;">
+        <option value="trace">trace</option>
+        <option value="debug">debug</option>
+        <option value="info">info</option>
+        <option value="warn">warn</option>
+        <option value="error">error</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Diagnostics</h3>
+    <button class="test-btn" id="btn-test-bench" onclick="testBenchmark()">Run Quick Benchmark (3s)</button>
+    <div id="bench-result"></div>
+  </div>
+
+  <div class="settings-actions">
+    <button class="save-btn" id="btn-save" onclick="saveConfig()">Save Configuration</button>
+    <span class="save-msg" id="save-msg"></span>
+  </div>
+  <p class="restart-note" style="margin-top:10px">Some changes (stratum, bind address) require a restart to take effect.</p>
+
+</div>
+</div>
+
+<footer>mi-miner v0.1.0 &mdash; Solo mining is a lottery. Good luck.</footer>
+</div>
+
+<script>
+/* ========== State ========== */
+var walletWords = [], walletAddress = '', confirmIndex = 0;
+
+/* ========== Init ========== */
+fetch('/api/wallet').then(function(r){return r.json()}).then(function(d) {
+  if (d.exists) { walletAddress = d.address; showDashboard(); }
+  else {
+    document.getElementById('setup-screen').classList.remove('hidden');
+    document.getElementById('step-welcome').classList.remove('hidden');
+  }
+});
+
+/* ========== Setup Flow ========== */
+function generateWallet() {
+  var btn = event.target; btn.disabled = true; btn.textContent = 'Generating...';
+  fetch('/api/wallet/generate',{method:'POST'}).then(function(r){return r.json()}).then(function(d) {
+    if (d.success) {
+      walletWords = d.mnemonic.split(' '); walletAddress = d.address;
+      document.getElementById('mnemonic-words').textContent = d.mnemonic;
+      document.getElementById('wallet-address').textContent = d.address;
+      document.getElementById('step-welcome').classList.add('hidden');
+      document.getElementById('step-mnemonic').classList.remove('hidden');
+    } else { btn.disabled=false; btn.textContent='Generate Wallet'; alert('Error: '+(d.error||'Unknown')); }
+  }).catch(function(e){ btn.disabled=false; btn.textContent='Generate Wallet'; alert('Error: '+e); });
+}
+function showConfirm() {
+  confirmIndex = 1 + Math.floor(Math.random()*(walletWords.length-2));
+  document.getElementById('confirm-word-num').textContent = confirmIndex+1;
+  document.getElementById('confirm-input').value = '';
+  document.getElementById('confirm-error').classList.add('hidden');
+  document.getElementById('step-mnemonic').classList.add('hidden');
+  document.getElementById('step-confirm').classList.remove('hidden');
+  document.getElementById('confirm-input').focus();
+}
+function verifyWord() {
+  if (document.getElementById('confirm-input').value.trim().toLowerCase() === walletWords[confirmIndex]) showDashboard();
+  else { document.getElementById('confirm-error').classList.remove('hidden'); document.getElementById('confirm-input').value=''; document.getElementById('confirm-input').focus(); }
+}
+
+/* ========== Dashboard ========== */
+function showDashboard() {
+  document.getElementById('setup-screen').classList.add('hidden');
+  document.getElementById('dashboard').classList.remove('hidden');
+  if (walletAddress) { document.getElementById('dash-address').textContent=walletAddress; document.getElementById('wallet-bar').classList.remove('hidden'); }
+  startSSE();
+  loadConfig();
+  loadHardware();
+}
+
+/* ========== Tabs ========== */
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  event.target.classList.add('active');
+  document.getElementById('tab-mining').classList.toggle('hidden', name!=='mining');
+  document.getElementById('tab-settings').classList.toggle('hidden', name!=='settings');
+}
+
+/* ========== Mining Controls ========== */
+function pauseMining() { fetch('/api/mining/pause',{method:'POST'}).then(function(r){return r.json()}).then(function(d){ if(d.success) updateControlState(true); }); }
+function resumeMining() { fetch('/api/mining/resume',{method:'POST'}).then(function(r){return r.json()}).then(function(d){ if(d.success) updateControlState(false); }); }
+function stopMining() {
+  if(!confirm('Stop the miner? You will need to restart it from the command line.')) return;
+  fetch('/api/mining/stop',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+    if(d.success){ var s=document.getElementById('mining-state'); s.textContent='Stopped'; s.className='mining-state stopped';
+      document.getElementById('btn-pause').classList.add('hidden'); document.getElementById('btn-resume').classList.add('hidden'); document.getElementById('btn-stop').disabled=true; }
+  });
+}
+function updateControlState(paused) {
+  var s=document.getElementById('mining-state'), bp=document.getElementById('btn-pause'), br=document.getElementById('btn-resume');
+  if(paused){ s.textContent='Paused'; s.className='mining-state paused'; bp.classList.add('hidden'); br.classList.remove('hidden'); }
+  else { s.textContent='Running'; s.className='mining-state running'; bp.classList.remove('hidden'); br.classList.add('hidden'); }
+}
+
+/* ========== Configuration ========== */
+function loadConfig() {
+  fetch('/api/config').then(function(r){return r.json()}).then(function(d) {
+    if (d.success && d.config) populateConfigForm(d.config);
+  });
+}
+
+function loadHardware() {
+  fetch('/api/hardware').then(function(r){return r.json()}).then(function(hw) {
+    var lines = [];
+    lines.push('Platform: ' + hw.platform);
+    lines.push('CPU: ' + hw.cpu_cores_performance + ' P-cores / ' + hw.cpu_cores_total + ' total');
+    lines.push('GPU: ' + (hw.gpu_available ? (hw.gpu_name || 'Available') : 'Not available (install Xcode for Metal shader)'));
+    if (hw.memory_gb > 0) lines.push('Memory: ' + hw.memory_gb + ' GB');
+    document.getElementById('hw-info').innerHTML = lines.join('<br>');
+  });
+}
+
+function autoConfig() {
+  var btn = document.getElementById('btn-auto-config');
+  var msg = document.getElementById('auto-msg');
+  btn.disabled = true; msg.textContent = 'Detecting...'; msg.className = 'save-msg';
+  fetch('/api/config/auto', {method:'POST'}).then(function(r){return r.json()}).then(function(d) {
+    btn.disabled = false;
+    if (d.success && d.config) {
+      populateConfigForm(d.config);
+      var note = 'Configured: ' + d.hardware.cpu_cores_performance + ' threads';
+      if (d.hardware.gpu_available) note += ', GPU enabled';
+      else note += ', CPU only';
+      msg.textContent = note;
+      msg.className = 'save-msg ok';
+    } else {
+      msg.textContent = 'Error: ' + (d.error || 'Unknown');
+      msg.className = 'save-msg err';
+    }
+    setTimeout(function(){ msg.textContent=''; }, 5000);
+  }).catch(function(e){ btn.disabled=false; msg.textContent='Error: '+e; msg.className='save-msg err'; });
+}
+
+function populateConfigForm(c) {
+    document.getElementById('cfg-threads').value = c.mining_threads;
+    document.getElementById('cfg-cpu-only').checked = c.cpu_only;
+    document.getElementById('cfg-gpu-only').checked = c.gpu_only;
+    document.getElementById('cfg-gpu-enabled').checked = c.gpu_enabled;
+    document.getElementById('cfg-gpu-intensity').value = Math.round(c.gpu_intensity*100);
+    document.getElementById('cfg-gpu-intensity-val').textContent = Math.round(c.gpu_intensity*100)+'%';
+    document.getElementById('cfg-gpu-batch').value = c.gpu_batch_size_log2;
+    document.getElementById('cfg-stratum-url').value = c.stratum_url;
+    document.getElementById('cfg-stratum-worker').value = c.stratum_worker;
+    document.getElementById('cfg-stratum-pass').value = c.stratum_password;
+    document.getElementById('cfg-activity-enabled').checked = c.activity_enabled;
+    document.getElementById('cfg-idle-timeout').value = c.activity_idle_timeout_secs;
+    document.getElementById('cfg-min-threads').value = c.activity_min_threads;
+    document.getElementById('cfg-min-gpu').value = Math.round(c.activity_min_gpu_intensity*100);
+    document.getElementById('cfg-min-gpu-val').textContent = Math.round(c.activity_min_gpu_intensity*100)+'%';
+    document.getElementById('cfg-ramp-up').value = c.activity_ramp_up_secs;
+    document.getElementById('cfg-ramp-down').value = c.activity_ramp_down_secs;
+    document.getElementById('cfg-cpu-thresh').value = Math.round(c.activity_cpu_threshold);
+    document.getElementById('cfg-web-bind').value = c.web_bind;
+    document.getElementById('cfg-log-level').value = c.log_level;
+}
+
+function gatherConfig() {
+  return {
+    mining_threads: parseInt(document.getElementById('cfg-threads').value)||1,
+    cpu_only: document.getElementById('cfg-cpu-only').checked,
+    gpu_only: document.getElementById('cfg-gpu-only').checked,
+    gpu_enabled: document.getElementById('cfg-gpu-enabled').checked,
+    gpu_intensity: parseInt(document.getElementById('cfg-gpu-intensity').value)/100,
+    gpu_batch_size_log2: parseInt(document.getElementById('cfg-gpu-batch').value)||24,
+    stratum_url: document.getElementById('cfg-stratum-url').value,
+    stratum_worker: document.getElementById('cfg-stratum-worker').value,
+    stratum_password: document.getElementById('cfg-stratum-pass').value,
+    web_bind: document.getElementById('cfg-web-bind').value,
+    web_enabled: true,
+    activity_enabled: document.getElementById('cfg-activity-enabled').checked,
+    activity_idle_timeout_secs: parseInt(document.getElementById('cfg-idle-timeout').value)||120,
+    activity_min_threads: parseInt(document.getElementById('cfg-min-threads').value)||1,
+    activity_min_gpu_intensity: parseInt(document.getElementById('cfg-min-gpu').value)/100,
+    activity_ramp_up_secs: parseInt(document.getElementById('cfg-ramp-up').value)||30,
+    activity_ramp_down_secs: parseInt(document.getElementById('cfg-ramp-down').value)||5,
+    activity_cpu_threshold: parseFloat(document.getElementById('cfg-cpu-thresh').value)||50,
+    log_level: document.getElementById('cfg-log-level').value
+  };
+}
+
+function saveConfig() {
+  var btn = document.getElementById('btn-save');
+  var msg = document.getElementById('save-msg');
+  btn.disabled = true; msg.textContent = 'Saving...'; msg.className = 'save-msg';
+  fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(gatherConfig())})
+    .then(function(r){return r.json()}).then(function(d) {
+      btn.disabled = false;
+      if (d.success) { msg.textContent = 'Saved'; msg.className = 'save-msg ok'; }
+      else { msg.textContent = 'Error: '+(d.error||'Unknown'); msg.className = 'save-msg err'; }
+      setTimeout(function(){ msg.textContent=''; }, 4000);
+    }).catch(function(e){ btn.disabled=false; msg.textContent='Error: '+e; msg.className='save-msg err'; });
+}
+
+/* ========== Tests ========== */
+function testConnection() {
+  var btn = document.getElementById('btn-test-conn');
+  var el = document.getElementById('conn-result');
+  btn.disabled = true; el.innerHTML = '<div class="test-result">Testing...</div>';
+  fetch('/api/test/connection',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+    btn.disabled = false;
+    var cls = d.success ? 'pass' : 'fail';
+    var html = '<div class="test-result '+cls+'">'+d.message;
+    if (d.details) html += '<div class="detail">'+d.details+'</div>';
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(e){ btn.disabled=false; el.innerHTML='<div class="test-result fail">Error: '+e+'</div>'; });
+}
+
+function testBenchmark() {
+  var btn = document.getElementById('btn-test-bench');
+  var el = document.getElementById('bench-result');
+  btn.disabled = true; el.innerHTML = '<div class="test-result">Running benchmark (3s)...</div>';
+  fetch('/api/test/benchmark',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+    btn.disabled = false;
+    var cls = d.success ? 'pass' : 'fail';
+    var html = '<div class="test-result '+cls+'">'+d.message;
+    if (d.details) html += '<div class="detail">'+d.details+'</div>';
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(e){ btn.disabled=false; el.innerHTML='<div class="test-result fail">Error: '+e+'</div>'; });
+}
+
+/* ========== Range sliders ========== */
+document.getElementById('cfg-gpu-intensity').addEventListener('input', function(){ document.getElementById('cfg-gpu-intensity-val').textContent = this.value+'%'; });
+document.getElementById('cfg-min-gpu').addEventListener('input', function(){ document.getElementById('cfg-min-gpu-val').textContent = this.value+'%'; });
+
+/* ========== SSE + Stats ========== */
+function fmtHash(h) {
+  if(h>=1e9) return (h/1e9).toFixed(2)+' GH/s';
+  if(h>=1e6) return (h/1e6).toFixed(2)+' MH/s';
+  if(h>=1e3) return (h/1e3).toFixed(2)+' KH/s';
+  return h+' H/s';
+}
+function fmtBig(n) {
+  if(n>=1e15) return (n/1e15).toFixed(2)+' PH';
+  if(n>=1e12) return (n/1e12).toFixed(2)+' TH';
+  if(n>=1e9) return (n/1e9).toFixed(2)+' GH';
+  if(n>=1e6) return (n/1e6).toFixed(2)+' MH';
+  if(n>=1e3) return (n/1e3).toFixed(1)+' K';
+  return n.toString();
+}
+function fmtTime(s) {
+  if(s<60) return s+'s';
+  if(s<3600) return Math.floor(s/60)+'m '+(s%60)+'s';
+  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+}
+
+function startSSE() {
+  var es = new EventSource('/events');
+  es.onopen = function(){ document.getElementById('conn-dot').className='status on'; document.getElementById('connection').innerHTML='<span class="status on"></span>Connected'; };
+  es.onerror = function(){ document.getElementById('conn-dot').className='status off'; document.getElementById('connection').innerHTML='<span class="status off"></span>Disconnected — retrying...'; };
+  es.onmessage = function(e) {
+    var d = JSON.parse(e.data);
+    document.getElementById('hashrate').textContent = fmtHash(d.combined_hashrate);
+    document.getElementById('cpu-hashrate').textContent = fmtHash(d.cpu_hashrate);
+    document.getElementById('gpu-hashrate').textContent = fmtHash(d.gpu_hashrate);
+    document.getElementById('threads').textContent = d.cpu_threads;
+    document.getElementById('gpu-intensity').textContent = d.gpu_intensity_pct+'%';
+    document.getElementById('gpu-bar').style.width = d.gpu_intensity_pct+'%';
+    document.getElementById('total-hashes').textContent = fmtBig(d.total_hashes);
+    document.getElementById('shares').textContent = d.shares_submitted;
+    document.getElementById('accepted').textContent = d.shares_accepted;
+    document.getElementById('rejected').textContent = d.shares_rejected;
+    document.getElementById('blocks').textContent = d.blocks_found;
+    document.getElementById('activity').innerHTML = d.is_user_active ? '<span class="active">Active</span>' : '<span class="idle">Idle</span>';
+    document.getElementById('idle-time').textContent = fmtTime(d.idle_secs);
+    document.getElementById('uptime').textContent = fmtTime(d.uptime_secs);
+    updateControlState(d.paused);
+  };
+}
+</script>
+</body>
+</html>

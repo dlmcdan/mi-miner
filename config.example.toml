@@ -1,0 +1,55 @@
+# mi-miner configuration
+# Copy to ~/.mi-miner/config.toml and edit
+
+[mining]
+# Number of CPU threads for mining (default: P-core count)
+# threads = 12
+cpu_only = false
+gpu_only = false
+
+[gpu]
+enabled = true
+# GPU intensity: 0.0 (idle) to 1.0 (full power)
+intensity = 1.0
+# Batch size as power of 2 (2^24 = ~16M nonces per GPU dispatch)
+batch_size_log2 = 24
+
+[stratum]
+# Solo mining pool (ckpool solo mode)
+url = "stratum+tcp://solo.ckpool.org:3333"
+# Set this to your Bitcoin address!
+worker = "YOUR_BITCOIN_ADDRESS.mi-miner"
+password = "x"
+
+[rpc]
+# Bitcoin Core RPC (alternative to stratum)
+url = "http://127.0.0.1:8332"
+user = "rpcuser"
+password = "rpcpassword"
+enabled = false
+
+[web]
+# Dashboard bind address
+bind = "127.0.0.1:7878"
+enabled = true
+
+[activity]
+# Adaptive throttling based on user activity
+enabled = true
+# Seconds of no input before ramping up
+idle_timeout_secs = 120
+# Minimum threads when user is active
+min_threads = 1
+# Minimum GPU intensity when user is active
+min_gpu_intensity = 0.1
+# Ramp-up time in seconds (gradual)
+ramp_up_secs = 30
+# Ramp-down time in seconds (fast, to not disturb user)
+ramp_down_secs = 5
+# CPU usage threshold — don't ramp up if system CPU is above this
+cpu_threshold = 50.0
+
+[logging]
+level = "info"
+# Uncomment to log to file instead of stdout
+# file = "~/.mi-miner/mi-miner.log"

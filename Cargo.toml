@@ -1,0 +1,42 @@
+[workspace]
+members = [
+    "crates/mi-core",
+    "crates/mi-mining",
+    "crates/mi-gpu",
+    "crates/mi-network",
+    "crates/mi-activity",
+    "crates/mi-web",
+]
+resolver = "2"
+
+[package]
+name = "mi-miner"
+version = "0.1.0"
+edition = "2021"
+description = "Solo Bitcoin miner with Metal GPU acceleration"
+license = "MIT"
+
+[[bin]]
+name = "mi-miner"
+path = "src/main.rs"
+
+[dependencies]
+mi-core = { path = "crates/mi-core" }
+mi-mining = { path = "crates/mi-mining" }
+mi-gpu = { path = "crates/mi-gpu" }
+mi-network = { path = "crates/mi-network" }
+mi-activity = { path = "crates/mi-activity" }
+mi-web = { path = "crates/mi-web" }
+
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+daemonize = "0.5"
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

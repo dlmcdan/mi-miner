@@ -1,0 +1,21 @@
+# Build artifacts
+/target
+**/*.rs.bk
+# Note: Cargo.lock IS committed (best practice for binary projects)
+
+# Compiled Metal shaders
+*.metallib
+*.air
+
+# Local IDE / tool settings
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Secrets / local config (wallet & config live in ~/.mi-miner/, not here)
+*.pem
+*.key
+.env

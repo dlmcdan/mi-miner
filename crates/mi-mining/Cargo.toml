@@ -1,0 +1,11 @@
+[package]
+name = "mi-mining"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mi-core = { path = "../mi-core" }
+sha2 = "0.10"
+crossbeam-channel = "0.5"
+tracing = "0.1"
+num_cpus = "1"

@@ -206,10 +206,10 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         None
     };
 
-    // Channels for share submission
+    // Channel for share submission to stratum
     let (submit_tx, submit_rx) = tokio::sync::mpsc::channel(64);
 
-    // CPU mining pool
+    // CPU mining pool — workers hash continuously, polling SharedWork for new jobs
     let submit_tx_mining = submit_tx.clone();
     let mining_pool = if !config.mining.gpu_only {
         let pool = mi_mining::MiningPool::new(
@@ -231,13 +231,33 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         None
     };
 
-    // Channel to send work from stratum callback (async) to pool feeder (sync)
-    let (pool_work_tx, pool_work_rx) =
-        std::sync::mpsc::sync_channel::<mi_mining::worker::Work>(4);
-
-    // Work distribution callback for stratum — sends directly to pool feeder
+    // Work distribution: stratum callback updates SharedWork, workers pick it up instantly
     let on_work: Arc<mi_network::stratum::client::WorkCallback> = {
-        let pool_work_tx = pool_work_tx.clone();
+        let pool = mining_pool.as_ref();
+        let has_pool = pool.is_some();
+        // We need a way to call pool.submit_work from the callback.
+        // Use a channel to bridge async callback → sync pool.
+        let (work_tx, work_rx) = std::sync::mpsc::sync_channel::<mi_mining::worker::Work>(2);
+
+        if let Some(ref pool) = mining_pool {
+            let pool_submit = {
+                // Clone what we need for the feeder thread
+                let shared_work = pool.shared_work();
+                let stats = stats.clone();
+                std::thread::Builder::new()
+                    .name("work-updater".to_string())
+                    .spawn(move || {
+                        while let Ok(work) = work_rx.recv() {
+                            if stats.should_stop.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            shared_work.update(work);
+                        }
+                    })
+                    .ok()
+            };
+        }
+
         Arc::new(Box::new(
             move |template: mi_mining::block::BlockTemplate, target: [u8; 32]| {
                 let (_header, header_bytes) = template.build_header(0);
@@ -245,55 +265,15 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                 let work = mi_mining::worker::Work {
                     header: header_bytes,
                     target,
-                    nonce_start: 0,
-                    nonce_end: u32::MAX / 10 * 9,
                     job_id: template.job_id.clone(),
                     extranonce: 0,
                 };
 
-                tracing::info!(job = template.job_id, "Distributing work to CPU pool");
-                let _ = pool_work_tx.send(work);
+                tracing::info!(job = template.job_id, "New work → miners");
+                let _ = work_tx.send(work);
             },
         ))
     };
-
-    // Pool feeder thread — receives work and submits to the mining pool
-    if let Some(ref pool) = mining_pool {
-        let pool_stats = stats.clone();
-        // We need a way to submit work to the pool from the feeder thread.
-        // The pool's submit_work takes &self, so we clone the work sender.
-        let work_sender = pool.work_sender();
-        std::thread::Builder::new()
-            .name("pool-feeder".to_string())
-            .spawn(move || {
-                while let Ok(work) = pool_work_rx.recv() {
-                    if pool_stats.should_stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    // Send work chunks directly to workers via the pool's channel
-                    let total_nonces = work.nonce_end.saturating_sub(work.nonce_start).max(1) as u64;
-                    // Split into chunks of ~100M nonces each for good granularity
-                    let chunk_size = 100_000_000u64;
-                    let mut start = work.nonce_start;
-                    while (start as u64) < work.nonce_end as u64 {
-                        let end = ((start as u64) + chunk_size).min(work.nonce_end as u64) as u32;
-                        let chunk = mi_mining::worker::Work {
-                            header: work.header,
-                            target: work.target,
-                            nonce_start: start,
-                            nonce_end: end,
-                            job_id: work.job_id.clone(),
-                            extranonce: work.extranonce,
-                        };
-                        if work_sender.send(chunk).is_err() {
-                            break;
-                        }
-                        start = end;
-                    }
-                }
-            })
-            .ok();
-    }
 
     // Stratum client — only connect if we have a valid wallet/address
     if needs_wallet {

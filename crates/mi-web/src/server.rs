@@ -13,6 +13,7 @@ pub async fn start_server(
         .route("/api/stats", axum::routing::get(routes::stats_json))
         .route("/api/wallet", axum::routing::get(routes::wallet_status))
         .route("/api/wallet/generate", axum::routing::post(routes::wallet_generate))
+        .route("/api/wallet/address", axum::routing::post(routes::wallet_set_address))
         .route("/api/mining/pause", axum::routing::post(routes::mining_pause))
         .route("/api/mining/resume", axum::routing::post(routes::mining_resume))
         .route("/api/mining/stop", axum::routing::post(routes::mining_stop))

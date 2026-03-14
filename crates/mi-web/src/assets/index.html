@@ -162,10 +162,35 @@
   <div id="step-welcome" class="setup">
     <h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
     <h2>Welcome</h2>
-    <p>To start mining, you need a Bitcoin wallet to receive any rewards.<br>We'll generate one for you right here.</p>
-    <button class="btn" onclick="generateWallet()">Generate Wallet</button>
-    <br><br>
-    <p style="font-size:0.8em">Already have a Bitcoin address? Set it in<br><code>~/.mi-miner/config.toml</code> under <code>[stratum].worker</code> and restart.</p>
+    <p>To start mining, you need a Bitcoin address to receive any rewards.<br>Choose an option below.</p>
+
+    <div class="card" style="text-align:left;margin:20px 0;padding:20px">
+      <h2>Option 1: Generate a New Wallet</h2>
+      <p style="color:var(--dim);font-size:0.85em;margin-bottom:12px">
+        We'll create a BIP39 wallet with a 12-word recovery phrase and a <code>bc1q</code> address.
+        No external software needed.
+      </p>
+      <button class="btn" onclick="generateWallet()">Generate New Wallet</button>
+    </div>
+
+    <div class="card" style="text-align:left;margin:20px 0;padding:20px">
+      <h2>Option 2: Use an Existing Address</h2>
+      <p style="color:var(--dim);font-size:0.85em;margin-bottom:12px">
+        Already have a wallet (Sparrow, Electrum, Ledger, Coinbase, etc.)?
+        Paste your Bitcoin receive address below.
+      </p>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="existing-address"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);
+                 padding:10px 12px;font-family:inherit;font-size:0.9em;border-radius:6px;flex:1"
+          placeholder="bc1q... or 1... or 3..."
+          onkeydown="if(event.key==='Enter')setExistingAddress()"
+          autocomplete="off" spellcheck="false">
+        <button class="btn" style="padding:10px 20px" onclick="setExistingAddress()">Use Address</button>
+      </div>
+      <p id="address-error" style="color:var(--red);font-size:0.85em;margin-top:8px" class="hidden"></p>
+      <p id="address-ok" style="color:var(--green);font-size:0.85em;margin-top:8px" class="hidden"></p>
+    </div>
   </div>
   <div id="step-mnemonic" class="setup hidden">
     <h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
@@ -312,6 +337,32 @@ fetch('/api/wallet').then(function(r){return r.json()}).then(function(d) {
 });
 
 /* ========== Setup Flow ========== */
+function setExistingAddress() {
+  var input = document.getElementById('existing-address');
+  var errEl = document.getElementById('address-error');
+  var okEl = document.getElementById('address-ok');
+  var address = input.value.trim();
+  errEl.classList.add('hidden'); okEl.classList.add('hidden');
+
+  if (!address) { errEl.textContent = 'Please enter an address.'; errEl.classList.remove('hidden'); return; }
+
+  fetch('/api/wallet/address', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({address: address})})
+    .then(function(r){return r.json()}).then(function(d) {
+      if (d.success) {
+        walletAddress = address;
+        okEl.textContent = 'Address saved. Restart the miner to connect with this address.';
+        okEl.classList.remove('hidden');
+        setTimeout(function(){ showDashboard(); }, 1500);
+      } else {
+        errEl.textContent = d.error || 'Invalid address.';
+        errEl.classList.remove('hidden');
+      }
+    }).catch(function(e) {
+      errEl.textContent = 'Error: ' + e;
+      errEl.classList.remove('hidden');
+    });
+}
+
 function generateWallet() {
   var btn = event.target; btn.disabled = true; btn.textContent = 'Generating...';
   fetch('/api/wallet/generate',{method:'POST'}).then(function(r){return r.json()}).then(function(d) {

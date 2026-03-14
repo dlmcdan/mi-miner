@@ -64,6 +64,67 @@ pub async fn wallet_generate() -> Json<WalletGenerated> {
     }
 }
 
+// ── Set Existing Address ──
+
+#[derive(Deserialize)]
+pub struct SetAddressRequest {
+    pub address: String,
+}
+
+#[derive(Serialize)]
+pub struct SetAddressResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub async fn wallet_set_address(Json(req): Json<SetAddressRequest>) -> Json<SetAddressResponse> {
+    let address = req.address.trim().to_string();
+
+    // Basic validation: must start with a valid Bitcoin address prefix
+    if !address.starts_with("bc1")
+        && !address.starts_with("1")
+        && !address.starts_with("3")
+        && !address.starts_with("tb1")
+    {
+        return Json(SetAddressResponse {
+            success: false,
+            error: Some("Invalid Bitcoin address. Expected an address starting with bc1, 1, 3, or tb1.".to_string()),
+        });
+    }
+
+    if address.len() < 26 || address.len() > 90 {
+        return Json(SetAddressResponse {
+            success: false,
+            error: Some("Invalid address length.".to_string()),
+        });
+    }
+
+    // Save address to config
+    let path = MinerConfig::default_path();
+    let mut config = if path.exists() {
+        MinerConfig::load(&path).unwrap_or_default()
+    } else {
+        MinerConfig::default()
+    };
+
+    config.stratum.worker = format!("{address}.mi-miner");
+
+    match config.save(&path) {
+        Ok(()) => {
+            tracing::info!("External wallet address set: {address}");
+            Json(SetAddressResponse {
+                success: true,
+                error: None,
+            })
+        }
+        Err(e) => Json(SetAddressResponse {
+            success: false,
+            error: Some(format!("Failed to save config: {e}")),
+        }),
+    }
+}
+
 // ── Mining Controls ──
 
 #[derive(Serialize)]

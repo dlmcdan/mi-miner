@@ -423,7 +423,7 @@ pub async fn test_benchmark() -> Json<TestResult> {
 
         while start.elapsed() < deadline {
             let end = nonce.saturating_add(chunk);
-            let (_, hashes) = hash_range_midstate(&header, nonce, end, &target, &stop, chunk);
+            let (_, hashes) = hash_range_midstate(&header, nonce, end, &target, &stop, chunk, None);
             total += hashes;
             nonce = end;
             if nonce == 0 {

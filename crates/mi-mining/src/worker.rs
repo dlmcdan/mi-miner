@@ -62,16 +62,17 @@ pub fn mining_worker(
             "Processing work"
         );
 
-        let (result, hashes_done) = hash_range_midstate(
+        let (result, _hashes_done) = hash_range_midstate(
             &work.header,
             work.nonce_start,
             work.nonce_end,
             &work.target,
             &stats.should_stop,
-            1 << 20, // Check stop every ~1M hashes
+            1 << 20, // Check stop + report hashes every ~1M hashes
+            Some(&stats),
         );
 
-        stats.add_cpu_hashes(hashes_done);
+        // Hashes already reported incrementally by the hasher
 
         match result {
             HashResult::Found { nonce, hash } => {

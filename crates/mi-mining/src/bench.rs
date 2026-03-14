@@ -117,7 +117,7 @@ fn bench_single_core(header: &[u8; 80], target: &[u8; 32], duration_secs: u64, u
     while start.elapsed() < deadline {
         let end = nonce.saturating_add(chunk);
         let (_, hashes) = if use_midstate {
-            hash_range_midstate(header, nonce, end, target, &stop, chunk)
+            hash_range_midstate(header, nonce, end, target, &stop, chunk, None)
         } else {
             hash_range_simple(header, nonce, end, target, &stop, chunk)
         };
@@ -153,7 +153,7 @@ fn bench_multi_core(header: &[u8; 80], target: &[u8; 32], duration_secs: u64, th
                 while start.elapsed() < deadline && !stop.load(Ordering::Relaxed) {
                     let end = nonce.saturating_add(chunk);
                     let (_, hashes) =
-                        hash_range_midstate(&header, nonce, end, &target, &stop, chunk);
+                        hash_range_midstate(&header, nonce, end, &target, &stop, chunk, None);
                     total_hashes += hashes;
                     nonce = end;
                 }

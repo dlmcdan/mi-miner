@@ -135,17 +135,18 @@ fn main() {
         eprintln!("CPU: {} P-cores / {} total", hw.cpu_cores_performance, hw.cpu_cores_total);
     }
 
-    // Auto-use wallet address if worker is still the default placeholder
-    let needs_wallet = if config.stratum.worker.starts_with("YOUR_BITCOIN_ADDRESS") {
-        if let Some(address) = mi_core::wallet::get_wallet_address() {
-            eprintln!("Using wallet address: {address}");
-            config.stratum.worker = format!("{address}.mi-miner");
-            false
-        } else {
-            true
+    // Always sync worker with wallet address (wallet is the source of truth)
+    let needs_wallet = if let Some(address) = mi_core::wallet::get_wallet_address() {
+        let expected_worker = format!("{address}.mi-miner");
+        if config.stratum.worker != expected_worker {
+            eprintln!("Syncing worker with wallet address: {address}");
+            config.stratum.worker = expected_worker;
         }
-    } else {
         false
+    } else if config.stratum.worker.starts_with("YOUR_BITCOIN_ADDRESS") {
+        true
+    } else {
+        false // Manual address set, no wallet file — keep it
     };
 
     if cli.benchmark {
@@ -181,6 +182,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     let prior_persistent = stats.load_persistent();
     let prior_uptime = prior_persistent.total_uptime_secs;
     let live_config = mi_core::LiveConfig::new(config.clone());
+    let (block_tx, _) = tokio::sync::broadcast::channel::<u64>(16);
 
     let pid_path = mi_core::config::dirs_path().join("mi-miner.pid");
     let _ = std::fs::create_dir_all(mi_core::config::dirs_path());
@@ -223,7 +225,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                 let submission = mi_network::stratum::client::ShareSubmission {
                     job_id: work.job_id.clone(),
                     extranonce2: work.extranonce,
-                    ntime: String::new(),
+                    ntime: work.ntime.clone(),
                     nonce,
                 };
                 let _ = submit_tx_mining.try_send(submission);
@@ -253,6 +255,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                     target,
                     job_id: template.job_id.clone(),
                     extranonce: 0,
+                    ntime: format!("{:08x}", template.timestamp),
                 };
 
                 tracing::info!(job = template.job_id, "New work → miners");
@@ -265,7 +268,6 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     if gpu_available {
         let shared_work = global_shared_work.clone();
         let stats_gpu = stats.clone();
-        let live_config_gpu = live_config.clone();
         let submit_tx_gpu = submit_tx.clone();
         let batch_size_log2 = config.gpu.batch_size_log2;
 
@@ -294,10 +296,13 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                     if let Some((gen, _work)) = shared_work.get_if_new(last_gen) {
                         last_gen = gen;
                         gpu_nonce = 0;
-
-                        // Update GPU intensity from live config
-                        mgr.set_intensity(live_config_gpu.gpu_intensity());
                     }
+
+                    // Update GPU intensity from throttle (checked every batch)
+                    let throttle_intensity =
+                        stats_gpu.throttle_gpu_intensity_pct.load(Ordering::Relaxed) as f32
+                            / 100.0;
+                    mgr.set_intensity(throttle_intensity);
 
                     // Get current work
                     let work = {
@@ -353,9 +358,11 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                         ]);
                     }
 
+                    let batch_start = std::time::Instant::now();
                     let (found, _batch_count) = mgr.mine_batch(
                         &midstate, &tail, &target, gpu_nonce,
                     );
+                    let batch_elapsed = batch_start.elapsed();
 
                     gpu_nonce = gpu_nonce.wrapping_add(mgr.batch_size() as u32);
 
@@ -364,10 +371,20 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                         let submission = mi_network::stratum::client::ShareSubmission {
                             job_id: work.job_id.clone(),
                             extranonce2: work.extranonce,
-                            ntime: String::new(),
+                            ntime: work.ntime.clone(),
                             nonce,
                         };
                         let _ = submit_tx_gpu.try_send(submission);
+                    }
+
+                    // Duty-cycle throttle: sleep proportionally to batch time
+                    // At intensity 0.1, run for T then sleep for 9T
+                    if throttle_intensity < 0.99 && throttle_intensity > 0.0 {
+                        let sleep_ratio = (1.0 / throttle_intensity) - 1.0;
+                        let sleep_dur = batch_elapsed.mul_f32(sleep_ratio);
+                        // Cap at 500ms to stay responsive to new work/stop signals
+                        let sleep_dur = sleep_dur.min(std::time::Duration::from_millis(500));
+                        std::thread::sleep(sleep_dur);
                     }
 
                     // Check for new work between batches
@@ -394,12 +411,19 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         eprintln!();
         stats.paused.store(true, Ordering::Relaxed);
     } else if !config.stratum.url.is_empty() {
-        let client = mi_network::StratumClient::new(
+        let mut client = mi_network::StratumClient::new(
             &config.stratum.url,
             &config.stratum.worker,
             &config.stratum.password,
             stats.clone(),
         );
+
+        // Block-found notification: broadcast to dashboard SSE + macOS notification
+        let block_tx_stratum = block_tx.clone();
+        client.set_on_block_found(std::sync::Arc::new(move |block_num| {
+            let _ = block_tx_stratum.send(block_num);
+            fire_macos_notification(block_num);
+        }));
 
         tokio::spawn(async move {
             if let Err(e) = client.run(on_work, submit_rx).await {
@@ -407,6 +431,31 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
             }
         });
     }
+
+    // Sleep inhibitor: prevent idle sleep while mining is active
+    let mut sleep_inhibitor = mi_activity::SleepInhibitor::new();
+    if !needs_wallet && !stats.paused.load(Ordering::Relaxed) {
+        sleep_inhibitor.enable();
+    }
+    let stats_sleep = stats.clone();
+    tokio::spawn(async move {
+        let mut was_active = !stats_sleep.paused.load(Ordering::Relaxed);
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        loop {
+            interval.tick().await;
+            if stats_sleep.should_stop.load(Ordering::Relaxed) {
+                sleep_inhibitor.disable();
+                break;
+            }
+            let is_active = !stats_sleep.paused.load(Ordering::Relaxed);
+            if is_active && !was_active {
+                sleep_inhibitor.enable();
+            } else if !is_active && was_active {
+                sleep_inhibitor.disable();
+            }
+            was_active = is_active;
+        }
+    });
 
     // Activity monitor
     if config.activity.enabled {
@@ -429,6 +478,7 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
             }
         });
 
+        let stats_throttle = stats.clone();
         tokio::spawn(async move {
             while throttle_rx.changed().await.is_ok() {
                 let state = throttle_rx.borrow().clone();
@@ -436,6 +486,20 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                     threads = state.target_threads,
                     gpu_intensity = state.target_gpu_intensity,
                     "Throttle update"
+                );
+
+                // Apply CPU thread throttle
+                stats_throttle
+                    .active_cpu_threads
+                    .store(state.target_threads as u64, Ordering::Relaxed);
+                stats_throttle
+                    .cpu_threads
+                    .store(state.target_threads as u64, Ordering::Relaxed);
+
+                // Apply GPU intensity throttle
+                stats_throttle.throttle_gpu_intensity_pct.store(
+                    (state.target_gpu_intensity * 100.0) as u64,
+                    Ordering::Relaxed,
                 );
             }
         });
@@ -446,19 +510,42 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
         let bind = config.web.bind.clone();
         let stats_web = stats.clone();
         let lc_web = live_config.clone();
+        let block_tx_web = block_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = mi_web::start_server(&bind, stats_web, lc_web).await {
+            if let Err(e) = mi_web::start_server(&bind, stats_web, lc_web, block_tx_web).await {
                 tracing::error!("Web server error: {e}");
             }
         });
     }
 
+    // Periodic hasher self-validation (every 60s, costs 1 SHA-256d)
+    let stats_validate = stats.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if stats_validate.should_stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match mi_mining::hasher::validate_hasher() {
+                Ok(()) => tracing::debug!("Hasher self-check passed"),
+                Err(e) => {
+                    tracing::error!("CRITICAL: Hasher self-check FAILED: {e}");
+                    tracing::error!("Pausing mining — hashes may be incorrect");
+                    stats_validate.paused.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    });
+
     // Hashrate calculator (1-second rolling window)
     let stats_hr = stats.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-        let mut last_cpu = 0u64;
-        let mut last_gpu = 0u64;
+        // Initialize to current values so the first tick (which fires immediately)
+        // doesn't report all historical hashes as a 1-second rate
+        let mut last_cpu = stats_hr.cpu_hashes.load(Ordering::Relaxed);
+        let mut last_gpu = stats_hr.gpu_hashes.load(Ordering::Relaxed);
 
         loop {
             interval.tick().await;
@@ -594,7 +681,20 @@ fn send_sigterm(_pid: i32) {
 }
 
 fn generate_wallet() {
-    match mi_core::wallet::generate_wallet() {
+    eprint!("Enter a passphrase to encrypt the recovery phrase: ");
+    let passphrase = rpassword::read_password().unwrap_or_default();
+    if passphrase.len() < 8 {
+        eprintln!("Passphrase must be at least 8 characters.");
+        std::process::exit(1);
+    }
+    eprint!("Confirm passphrase: ");
+    let confirm = rpassword::read_password().unwrap_or_default();
+    if passphrase != confirm {
+        eprintln!("Passphrases do not match.");
+        std::process::exit(1);
+    }
+
+    match mi_core::wallet::generate_wallet(&passphrase) {
         Ok(info) => {
             println!("=== New Bitcoin Wallet Generated ===\n");
             println!("Address:  {}\n", info.address);
@@ -672,4 +772,16 @@ fn install_launchd_service() {
     println!("Contents:\n{plist}");
     println!("\nTo install, save this plist and run:");
     println!("  launchctl load {}", plist_path.display());
+}
+
+fn fire_macos_notification(block_num: u64) {
+    let script = format!(
+        r#"display notification "Block #{} found! Check your wallet for ~3.125 BTC." with title "mi-miner: BLOCK FOUND!" sound name "Glass""#,
+        block_num
+    );
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .spawn()
+        .ok();
 }

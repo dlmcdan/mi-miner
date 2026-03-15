@@ -24,6 +24,21 @@ pub struct MiningStats {
     pub cpu_hashrate: AtomicU64,
     pub gpu_hashrate: AtomicU64,
 
+    // Throttle targets (set by activity monitor)
+    pub active_cpu_threads: AtomicU64,
+    pub throttle_gpu_intensity_pct: AtomicU64, // 0-100
+
+    // Difficulty (f64 stored as u64 bits via f64::to_bits/from_bits)
+    pub pool_difficulty: AtomicU64,
+    pub network_difficulty: AtomicU64,
+
+    // Power consumption (milliwatts, from IOReport on macOS)
+    pub power_cpu_mw: AtomicU64,
+    pub power_gpu_mw: AtomicU64,
+    pub power_ane_mw: AtomicU64,
+    pub power_dram_mw: AtomicU64,
+    pub power_total_mw: AtomicU64,
+
     // Control
     pub should_stop: AtomicBool,
     pub paused: AtomicBool,
@@ -47,6 +62,15 @@ impl MiningStats {
             idle_secs: AtomicU64::new(0),
             cpu_hashrate: AtomicU64::new(0),
             gpu_hashrate: AtomicU64::new(0),
+            active_cpu_threads: AtomicU64::new(0),
+            throttle_gpu_intensity_pct: AtomicU64::new(100),
+            pool_difficulty: AtomicU64::new(0),
+            network_difficulty: AtomicU64::new(0),
+            power_cpu_mw: AtomicU64::new(0),
+            power_gpu_mw: AtomicU64::new(0),
+            power_ane_mw: AtomicU64::new(0),
+            power_dram_mw: AtomicU64::new(0),
+            power_total_mw: AtomicU64::new(0),
             should_stop: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             start_time: Instant::now(),
@@ -91,6 +115,13 @@ impl MiningStats {
             idle_secs: self.idle_secs.load(Ordering::Relaxed),
             uptime_secs: self.uptime_secs(),
             paused: self.paused.load(Ordering::Relaxed),
+            pool_difficulty: f64::from_bits(self.pool_difficulty.load(Ordering::Relaxed)),
+            network_difficulty: f64::from_bits(self.network_difficulty.load(Ordering::Relaxed)),
+            power_cpu_mw: self.power_cpu_mw.load(Ordering::Relaxed),
+            power_gpu_mw: self.power_gpu_mw.load(Ordering::Relaxed),
+            power_ane_mw: self.power_ane_mw.load(Ordering::Relaxed),
+            power_dram_mw: self.power_dram_mw.load(Ordering::Relaxed),
+            power_total_mw: self.power_total_mw.load(Ordering::Relaxed),
         }
     }
 }
@@ -113,6 +144,13 @@ pub struct StatsSnapshot {
     pub idle_secs: u64,
     pub uptime_secs: u64,
     pub paused: bool,
+    pub pool_difficulty: f64,
+    pub network_difficulty: f64,
+    pub power_cpu_mw: u64,
+    pub power_gpu_mw: u64,
+    pub power_ane_mw: u64,
+    pub power_dram_mw: u64,
+    pub power_total_mw: u64,
 }
 
 /// Persistent stats saved to disk across runs.
@@ -280,5 +318,137 @@ mod tests {
         }
 
         assert_eq!(stats.cpu_hashes.load(Ordering::Relaxed), 4000);
+    }
+
+    #[test]
+    fn test_snapshot_includes_active_cpu_threads() {
+        let stats = MiningStats::new();
+        // Default should be 0
+        assert_eq!(stats.active_cpu_threads.load(Ordering::Relaxed), 0);
+
+        stats.active_cpu_threads.store(6, Ordering::Relaxed);
+        assert_eq!(stats.active_cpu_threads.load(Ordering::Relaxed), 6);
+    }
+
+    #[test]
+    fn test_snapshot_includes_throttle_gpu_intensity() {
+        let stats = MiningStats::new();
+        // Default should be 100
+        assert_eq!(stats.throttle_gpu_intensity_pct.load(Ordering::Relaxed), 100);
+
+        stats.throttle_gpu_intensity_pct.store(50, Ordering::Relaxed);
+        assert_eq!(stats.throttle_gpu_intensity_pct.load(Ordering::Relaxed), 50);
+    }
+
+    #[test]
+    fn test_persistent_stats_default() {
+        let p = PersistentStats::default();
+        assert_eq!(p.total_cpu_hashes, 0);
+        assert_eq!(p.total_gpu_hashes, 0);
+        assert_eq!(p.total_shares_submitted, 0);
+        assert_eq!(p.total_shares_accepted, 0);
+        assert_eq!(p.total_shares_rejected, 0);
+        assert_eq!(p.total_blocks_found, 0);
+        assert_eq!(p.total_uptime_secs, 0);
+    }
+
+    // NOTE: Persistent stats tests that use HOME env var are combined into one test
+    // because HOME is process-global and parallel tests would race on it.
+    #[test]
+    fn test_persistent_stats_disk_operations() {
+        let test_dir = std::env::temp_dir().join("mi-miner-test-persistent-combined");
+        let _ = std::fs::create_dir_all(&test_dir);
+        let _ = std::fs::remove_dir_all(&test_dir.join(".mi-miner"));
+        let orig_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", test_dir.to_str().unwrap());
+
+        // --- Part 1: Load from nonexistent file returns default ---
+        let loaded = PersistentStats::load();
+        assert_eq!(loaded.total_cpu_hashes, 0);
+        assert_eq!(loaded.total_gpu_hashes, 0);
+        assert_eq!(loaded.total_uptime_secs, 0);
+
+        // --- Part 2: PersistentStats save and load roundtrip ---
+        let stats = PersistentStats {
+            total_cpu_hashes: 1_000_000,
+            total_gpu_hashes: 5_000_000,
+            total_shares_submitted: 10,
+            total_shares_accepted: 8,
+            total_shares_rejected: 2,
+            total_blocks_found: 1,
+            total_uptime_secs: 3600,
+        };
+        stats.save();
+
+        let loaded = PersistentStats::load();
+        assert_eq!(loaded.total_cpu_hashes, 1_000_000);
+        assert_eq!(loaded.total_gpu_hashes, 5_000_000);
+        assert_eq!(loaded.total_shares_submitted, 10);
+        assert_eq!(loaded.total_shares_accepted, 8);
+        assert_eq!(loaded.total_shares_rejected, 2);
+        assert_eq!(loaded.total_blocks_found, 1);
+        assert_eq!(loaded.total_uptime_secs, 3600);
+
+        // --- Part 3: MiningStats save_persistent and load_persistent roundtrip ---
+        // Clear old data first
+        let _ = std::fs::remove_dir_all(&test_dir.join(".mi-miner"));
+
+        let mining_stats = MiningStats::new();
+        mining_stats.add_cpu_hashes(500);
+        mining_stats.add_gpu_hashes(2000);
+        mining_stats.shares_submitted.store(5, Ordering::Relaxed);
+        mining_stats.shares_accepted.store(4, Ordering::Relaxed);
+        mining_stats.shares_rejected.store(1, Ordering::Relaxed);
+        mining_stats.blocks_found.store(0, Ordering::Relaxed);
+
+        mining_stats.save_persistent(100); // 100 seconds prior uptime
+
+        // Create fresh stats and load persistent data
+        let stats2 = MiningStats::new();
+        let persistent = stats2.load_persistent();
+
+        assert_eq!(persistent.total_cpu_hashes, 500);
+        assert_eq!(persistent.total_gpu_hashes, 2000);
+        assert_eq!(persistent.total_shares_submitted, 5);
+        assert_eq!(persistent.total_shares_accepted, 4);
+        assert_eq!(persistent.total_shares_rejected, 1);
+        assert_eq!(persistent.total_blocks_found, 0);
+        // Uptime = prior_uptime(100) + elapsed (~0 in test)
+        assert!(persistent.total_uptime_secs >= 100);
+
+        // The new stats object should have persistent values loaded
+        assert_eq!(stats2.cpu_hashes.load(Ordering::Relaxed), 500);
+        assert_eq!(stats2.gpu_hashes.load(Ordering::Relaxed), 2000);
+        assert_eq!(stats2.shares_submitted.load(Ordering::Relaxed), 5);
+        assert_eq!(stats2.shares_accepted.load(Ordering::Relaxed), 4);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&test_dir.join(".mi-miner"));
+        if let Some(h) = orig_home {
+            std::env::set_var("HOME", h);
+        }
+    }
+
+    #[test]
+    fn test_persistent_stats_serializes_to_json() {
+        let stats = PersistentStats {
+            total_cpu_hashes: 42,
+            total_gpu_hashes: 99,
+            total_shares_submitted: 3,
+            total_shares_accepted: 2,
+            total_shares_rejected: 1,
+            total_blocks_found: 0,
+            total_uptime_secs: 7200,
+        };
+
+        let json = serde_json::to_string(&stats).unwrap();
+        assert!(json.contains("\"total_cpu_hashes\":42"));
+        assert!(json.contains("\"total_gpu_hashes\":99"));
+        assert!(json.contains("\"total_uptime_secs\":7200"));
+
+        // Roundtrip via JSON
+        let deserialized: PersistentStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_cpu_hashes, 42);
+        assert_eq!(deserialized.total_gpu_hashes, 99);
     }
 }

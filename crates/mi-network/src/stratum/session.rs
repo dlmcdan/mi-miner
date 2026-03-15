@@ -104,32 +104,33 @@ fn decode_prev_hash(hex: &str) -> Result<[u8; 32], String> {
 }
 
 /// Convert difficulty to target bytes (big-endian 256-bit).
+/// target = diff1_target / difficulty, computed via byte-level long division.
 fn difficulty_to_target(difficulty: f64) -> [u8; 32] {
-    // Difficulty 1 target = 0x00000000FFFF0000...0000 (26 trailing zero bytes)
     let diff1_target = nbits_to_target(0x1d00ffff);
 
     if difficulty <= 0.0 || difficulty == 1.0 {
         return diff1_target;
     }
 
-    // target = diff1_target / difficulty
-    // Use f64 arithmetic on the significant portion.
-    // diff1 ≈ 0xFFFF * 2^(26*8) = 0xFFFF * 2^208
-    // We compute in log space then reconstruct.
-    let diff1_mantissa: f64 = 0xFFFF as f64; // significant part
-    let target_mantissa = diff1_mantissa / difficulty;
+    // Long division: diff1_target (256-bit big-endian) / difficulty
+    // Use u32 intermediates to handle quotients > 255 (when difficulty < 1)
+    let mut wide = [0u32; 32];
+    let mut remainder = 0.0f64;
 
-    // diff1 target has 0xFFFF at bytes [4..6] (big-endian), rest zeros.
-    // After dividing by difficulty, we scale and place appropriately.
+    for i in 0..32 {
+        let val = remainder * 256.0 + diff1_target[i] as f64;
+        let quotient = (val / difficulty).floor();
+        remainder = val - quotient * difficulty;
+        wide[i] = quotient.min(u32::MAX as f64) as u32;
+    }
+
+    // Propagate carries from right to left
     let mut target = [0u8; 32];
-
-    // Place the 2-byte mantissa region scaled by difficulty
-    // For difficulty >= 1, the result fits in the same byte range or earlier
-    if target_mantissa >= 1.0 {
-        let val = target_mantissa as u32;
-        // Place at bytes 4-5 (same position as diff1 target's 0xFFFF)
-        target[4] = ((val >> 8) & 0xFF) as u8;
-        target[5] = (val & 0xFF) as u8;
+    let mut carry = 0u32;
+    for i in (0..32).rev() {
+        let val = wide[i] + carry;
+        target[i] = (val & 0xFF) as u8;
+        carry = val >> 8;
     }
 
     target
@@ -211,6 +212,28 @@ mod tests {
     }
 
     #[test]
+    fn test_difficulty_to_target_diff2() {
+        let target = difficulty_to_target(2.0);
+        // diff1 = 0x00000000FFFF0000...
+        // diff1/2 = 0x000000007FFF8000...
+        assert_eq!(target[4], 0x7F);
+        assert_eq!(target[5], 0xFF);
+        assert_eq!(target[6], 0x80);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_fractional() {
+        let t_half = difficulty_to_target(0.5);
+        let t1 = difficulty_to_target(1.0);
+        // diff < 1 means easier (larger target)
+        assert!(t_half > t1);
+        // diff1/0.5 = diff1*2 = 0x00000001FFFE0000...
+        assert_eq!(t_half[3], 0x01);
+        assert_eq!(t_half[4], 0xFF);
+        assert_eq!(t_half[5], 0xFE);
+    }
+
+    #[test]
     fn test_process_notify() {
         let mut session = StratumSession::new("w".to_string());
         session.set_extranonce("aabb", 4);
@@ -258,5 +281,218 @@ mod tests {
         let session = StratumSession::new("w".to_string());
         let target = session.share_target();
         assert_eq!(target, nbits_to_target(0x1d00ffff));
+    }
+
+    #[test]
+    fn test_difficulty_to_target_large_difficulty_1000() {
+        let target = difficulty_to_target(1000.0);
+        let diff1 = nbits_to_target(0x1d00ffff);
+        // Must be strictly smaller than diff1
+        assert!(target < diff1);
+        // Must be 32 bytes
+        assert_eq!(target.len(), 32);
+        // Leading bytes should be zero (higher difficulty = smaller target)
+        assert_eq!(target[0], 0);
+        assert_eq!(target[1], 0);
+        assert_eq!(target[2], 0);
+        assert_eq!(target[3], 0);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_large_difficulty_65535() {
+        let target = difficulty_to_target(65535.0);
+        assert_eq!(target.len(), 32);
+        let diff1 = nbits_to_target(0x1d00ffff);
+        assert!(target < diff1);
+        // At diff 65535, target should be very small
+        let t1000 = difficulty_to_target(1000.0);
+        assert!(target < t1000);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_always_32_bytes() {
+        let difficulties = [0.001, 0.1, 0.5, 1.0, 2.0, 100.0, 1000.0, 65535.0, 1_000_000.0];
+        for diff in difficulties {
+            let target = difficulty_to_target(diff);
+            assert_eq!(target.len(), 32, "target for diff {} was not 32 bytes", diff);
+        }
+    }
+
+    #[test]
+    fn test_difficulty_to_target_negative_returns_diff1() {
+        let target = difficulty_to_target(-5.0);
+        let diff1 = nbits_to_target(0x1d00ffff);
+        assert_eq!(target, diff1);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_ordering_is_monotonic() {
+        // Higher difficulty must always produce a smaller (or equal) target
+        let diffs = [0.5, 1.0, 2.0, 10.0, 100.0, 1000.0, 65535.0];
+        for i in 0..diffs.len() - 1 {
+            let t_low = difficulty_to_target(diffs[i]);
+            let t_high = difficulty_to_target(diffs[i + 1]);
+            assert!(
+                t_high <= t_low,
+                "target for diff {} should be <= target for diff {}",
+                diffs[i + 1],
+                diffs[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_process_notify_invalid_nbits_returns_error() {
+        let mut session = StratumSession::new("w".to_string());
+        let notify = MiningNotify {
+            job_id: "j".to_string(),
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            coinbase_1: "".to_string(),
+            coinbase_2: "".to_string(),
+            merkle_branches: vec![],
+            version: "20000000".to_string(),
+            nbits: "ZZZZZZZZ".to_string(), // invalid hex for nbits
+            ntime: "65a5e300".to_string(),
+            clean_jobs: false,
+        };
+        let result = session.process_notify(notify);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid nbits"));
+    }
+
+    #[test]
+    fn test_process_notify_invalid_ntime_returns_error() {
+        let mut session = StratumSession::new("w".to_string());
+        let notify = MiningNotify {
+            job_id: "j".to_string(),
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            coinbase_1: "".to_string(),
+            coinbase_2: "".to_string(),
+            merkle_branches: vec![],
+            version: "20000000".to_string(),
+            nbits: "1d00ffff".to_string(),
+            ntime: "XXXXXXXX".to_string(), // invalid hex for ntime
+            clean_jobs: false,
+        };
+        let result = session.process_notify(notify);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid ntime"));
+    }
+
+    #[test]
+    fn test_process_notify_sets_current_job() {
+        let mut session = StratumSession::new("w".to_string());
+        session.set_extranonce("aabb", 4);
+        assert!(session.current_job.is_none());
+
+        let notify = MiningNotify {
+            job_id: "myjob42".to_string(),
+            prev_hash: "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+                .to_string(),
+            coinbase_1: "aabbccdd".to_string(),
+            coinbase_2: "11223344".to_string(),
+            merkle_branches: vec![],
+            version: "20000000".to_string(),
+            nbits: "1d00ffff".to_string(),
+            ntime: "65a5e300".to_string(),
+            clean_jobs: true,
+        };
+
+        let template = session.process_notify(notify).unwrap();
+        assert_eq!(template.job_id, "myjob42");
+        assert!(template.clean_jobs);
+
+        // Verify current_job is set
+        let job = session.current_job.as_ref().unwrap();
+        assert_eq!(job.job_id, "myjob42");
+        assert!(job.clean_jobs);
+    }
+
+    #[test]
+    fn test_process_notify_replaces_current_job() {
+        let mut session = StratumSession::new("w".to_string());
+        session.set_extranonce("aa", 4);
+
+        let make_notify = |id: &str| MiningNotify {
+            job_id: id.to_string(),
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            coinbase_1: "".to_string(),
+            coinbase_2: "".to_string(),
+            merkle_branches: vec![],
+            version: "20000000".to_string(),
+            nbits: "1d00ffff".to_string(),
+            ntime: "65a5e300".to_string(),
+            clean_jobs: false,
+        };
+
+        session.process_notify(make_notify("first")).unwrap();
+        assert_eq!(session.current_job.as_ref().unwrap().job_id, "first");
+
+        session.process_notify(make_notify("second")).unwrap();
+        assert_eq!(session.current_job.as_ref().unwrap().job_id, "second");
+    }
+
+    #[test]
+    fn test_process_notify_invalid_merkle_branch_length() {
+        let mut session = StratumSession::new("w".to_string());
+        session.set_extranonce("aa", 4);
+
+        let notify = MiningNotify {
+            job_id: "j".to_string(),
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            coinbase_1: "".to_string(),
+            coinbase_2: "".to_string(),
+            merkle_branches: vec!["aabb".to_string()], // only 2 bytes, need 32
+            version: "20000000".to_string(),
+            nbits: "1d00ffff".to_string(),
+            ntime: "65a5e300".to_string(),
+            clean_jobs: false,
+        };
+
+        let result = session.process_notify(notify);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid merkle branch length"));
+    }
+
+    #[test]
+    fn test_process_notify_coinbase_includes_extranonce1() {
+        let mut session = StratumSession::new("w".to_string());
+        session.set_extranonce("deadbeef", 4);
+
+        let notify = MiningNotify {
+            job_id: "j".to_string(),
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            coinbase_1: "01020304".to_string(),
+            coinbase_2: "".to_string(),
+            merkle_branches: vec![],
+            version: "20000000".to_string(),
+            nbits: "1d00ffff".to_string(),
+            ntime: "65a5e300".to_string(),
+            clean_jobs: false,
+        };
+
+        let template = session.process_notify(notify).unwrap();
+        // coinbase_1 should be original bytes + extranonce1
+        assert_eq!(
+            template.coinbase_1,
+            vec![0x01, 0x02, 0x03, 0x04, 0xde, 0xad, 0xbe, 0xef]
+        );
+    }
+
+    #[test]
+    fn test_share_target_changes_with_difficulty() {
+        let mut session = StratumSession::new("w".to_string());
+
+        let target_diff1 = session.share_target();
+
+        session.current_difficulty = 100.0;
+        let target_diff100 = session.share_target();
+
+        assert!(target_diff100 < target_diff1);
     }
 }

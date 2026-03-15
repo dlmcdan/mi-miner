@@ -8,10 +8,12 @@ pub async fn start_server(
     bind: &str,
     stats: Arc<MiningStats>,
     live_config: Arc<LiveConfig>,
+    block_events: tokio::sync::broadcast::Sender<u64>,
 ) -> Result<(), mi_core::MiMinerError> {
     let state = routes::AppState {
         stats,
         live_config,
+        block_events,
     };
 
     let app = Router::new()
@@ -19,7 +21,10 @@ pub async fn start_server(
         .route("/api/stats", axum::routing::get(routes::stats_json))
         .route("/api/wallet", axum::routing::get(routes::wallet_status))
         .route("/api/wallet/generate", axum::routing::post(routes::wallet_generate))
+        .route("/api/wallet/restore", axum::routing::post(routes::wallet_restore))
+        .route("/api/wallet/mnemonic", axum::routing::post(routes::wallet_mnemonic))
         .route("/api/wallet/address", axum::routing::post(routes::wallet_set_address))
+        .route("/api/wallet/qr", axum::routing::get(routes::wallet_qr))
         .route("/api/mining/pause", axum::routing::post(routes::mining_pause))
         .route("/api/mining/resume", axum::routing::post(routes::mining_resume))
         .route("/api/mining/stop", axum::routing::post(routes::mining_stop))
@@ -30,6 +35,7 @@ pub async fn start_server(
         .route("/api/config/auto", axum::routing::post(routes::auto_configure))
         .route("/api/test/connection", axum::routing::post(routes::test_connection))
         .route("/api/test/benchmark", axum::routing::post(routes::test_benchmark))
+        .route("/api/pools", axum::routing::get(routes::pools_list))
         .route("/events", axum::routing::get(sse::stats_stream))
         .with_state(state);
 

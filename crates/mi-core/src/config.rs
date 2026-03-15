@@ -24,6 +24,12 @@ pub struct MiningConfig {
     pub threads: usize,
     pub cpu_only: bool,
     pub gpu_only: bool,
+    #[serde(default = "default_electricity_cost")]
+    pub electricity_cost_kwh: f64,
+}
+
+fn default_electricity_cost() -> f64 {
+    0.12
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +82,7 @@ fn default_mining() -> MiningConfig {
         threads: num_p_cores(),
         cpu_only: false,
         gpu_only: false,
+        electricity_cost_kwh: default_electricity_cost(),
     }
 }
 

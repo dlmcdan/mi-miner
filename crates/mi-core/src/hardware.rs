@@ -260,6 +260,178 @@ mod tests {
         assert!(json.contains("cpu_cores_total"));
         assert!(json.contains("platform"));
     }
+
+    #[test]
+    fn test_check_optimization_with_default_config() {
+        let config = crate::config::MinerConfig::default();
+        let warnings = check_optimization(&config);
+
+        // Default config has activity throttling enabled, so we should get
+        // at least the Info-level throttling warning.
+        let has_activity_info = warnings.iter().any(|w| {
+            matches!(w.severity, Severity::Info)
+                && w.message.contains("Activity throttling")
+        });
+        assert!(
+            has_activity_info,
+            "Expected activity throttling info warning with default config. Got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_check_optimization_gpu_enabled_optimal() {
+        let hw = detect();
+        let mut config = crate::config::MinerConfig::default();
+        config.gpu.enabled = true;
+        config.gpu.intensity = 1.0;
+        config.mining.threads = hw.cpu_cores_performance;
+        config.mining.gpu_only = false;
+
+        let warnings = check_optimization(&config);
+
+        // Should NOT have the "GPU disabled" warning
+        let has_gpu_disabled = warnings.iter().any(|w| {
+            w.message.contains("GPU mining is disabled")
+        });
+        assert!(
+            !has_gpu_disabled,
+            "Should not warn about GPU being disabled when it is enabled"
+        );
+
+        // Should NOT have the "fewer threads than P-cores" warning
+        let has_fewer_threads = warnings.iter().any(|w| {
+            matches!(w.severity, Severity::Medium) && w.message.contains("CPU threads")
+        });
+        assert!(
+            !has_fewer_threads,
+            "Should not warn about thread count when using all P-cores"
+        );
+
+        // Should NOT have the GPU intensity warning (intensity is 1.0 >= 0.9)
+        let has_intensity_warning = warnings.iter().any(|w| {
+            w.message.contains("GPU intensity")
+        });
+        assert!(
+            !has_intensity_warning,
+            "Should not warn about GPU intensity when at 100%"
+        );
+    }
+
+    #[test]
+    fn test_check_optimization_gpu_disabled() {
+        let hw = detect();
+        let mut config = crate::config::MinerConfig::default();
+        config.gpu.enabled = false;
+        config.mining.threads = hw.cpu_cores_performance;
+
+        let warnings = check_optimization(&config);
+
+        if hw.gpu_available {
+            // If the test machine has a GPU, we should get a High severity warning
+            let has_gpu_warning = warnings.iter().any(|w| {
+                matches!(w.severity, Severity::High)
+                    && w.message.contains("GPU mining is disabled")
+            });
+            assert!(
+                has_gpu_warning,
+                "Expected GPU disabled warning when GPU is available but disabled"
+            );
+        }
+        // If no GPU on the test machine, no GPU-related warning is expected
+    }
+
+    #[test]
+    fn test_check_optimization_low_gpu_intensity() {
+        let mut config = crate::config::MinerConfig::default();
+        config.gpu.enabled = true;
+        config.gpu.intensity = 0.5;
+
+        let warnings = check_optimization(&config);
+
+        let has_intensity_warning = warnings.iter().any(|w| {
+            matches!(w.severity, Severity::Low)
+                && w.message.contains("GPU intensity")
+        });
+        assert!(
+            has_intensity_warning,
+            "Expected low GPU intensity warning when intensity is 50%"
+        );
+    }
+
+    #[test]
+    fn test_check_optimization_fewer_threads_than_pcores() {
+        let hw = detect();
+        if hw.cpu_cores_performance <= 1 {
+            // Can't test this on single-core machines
+            return;
+        }
+        let mut config = crate::config::MinerConfig::default();
+        config.mining.threads = 1;
+        config.mining.gpu_only = false;
+
+        let warnings = check_optimization(&config);
+
+        let has_thread_warning = warnings.iter().any(|w| {
+            matches!(w.severity, Severity::Medium)
+                && w.message.contains("CPU threads")
+                && w.message.contains("performance cores")
+        });
+        assert!(
+            has_thread_warning,
+            "Expected thread count warning when using 1 thread with {} P-cores. Got: {:?}",
+            hw.cpu_cores_performance, warnings
+        );
+    }
+
+    #[test]
+    fn test_check_optimization_too_many_threads() {
+        let hw = detect();
+        if hw.cpu_cores_performance >= hw.cpu_cores_total {
+            // All cores are P-cores; can't trigger the E-core warning
+            return;
+        }
+        let mut config = crate::config::MinerConfig::default();
+        config.mining.threads = hw.cpu_cores_total; // includes E-cores
+
+        let warnings = check_optimization(&config);
+
+        let has_ecore_warning = warnings.iter().any(|w| {
+            matches!(w.severity, Severity::Low)
+                && w.message.contains("efficiency cores")
+        });
+        assert!(
+            has_ecore_warning,
+            "Expected E-core warning when using {} threads with {} P-cores. Got: {:?}",
+            hw.cpu_cores_total, hw.cpu_cores_performance, warnings
+        );
+    }
+
+    #[test]
+    fn test_optimization_warning_serializes() {
+        let warning = OptimizationWarning {
+            severity: Severity::High,
+            message: "Test message".to_string(),
+            fix: "Test fix".to_string(),
+        };
+        let json = serde_json::to_string(&warning).unwrap();
+        assert!(json.contains("\"severity\":\"high\""));
+        assert!(json.contains("\"message\":\"Test message\""));
+        assert!(json.contains("\"fix\":\"Test fix\""));
+    }
+
+    #[test]
+    fn test_severity_serializes_lowercase() {
+        let high = serde_json::to_string(&Severity::High).unwrap();
+        let medium = serde_json::to_string(&Severity::Medium).unwrap();
+        let low = serde_json::to_string(&Severity::Low).unwrap();
+        let info = serde_json::to_string(&Severity::Info).unwrap();
+
+        assert_eq!(high, "\"high\"");
+        assert_eq!(medium, "\"medium\"");
+        assert_eq!(low, "\"low\"");
+        assert_eq!(info, "\"info\"");
+    }
 }
 
 fn detect_memory() -> u64 {

@@ -41,6 +41,22 @@
   .status.on { background: var(--green); }
   .status.off { background: var(--red); }
   #connection { font-size: 0.8em; color: var(--dim); }
+
+  /* Dashboard two-column layout */
+  .dash-layout { display: flex; gap: 16px; align-items: flex-start; }
+  .dash-main { flex: 2; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .dash-side { flex: 1; min-width: 280px; max-width: 400px; display: flex; flex-direction: column; gap: 8px; position: sticky; top: 16px; max-height: calc(100vh - 100px); overflow-y: auto; font-size: 0.82em; }
+  .dash-side .card { padding: 12px; }
+  .dash-side .card h2 { font-size: 0.7em; margin-bottom: 6px; }
+  .dash-side .row { margin: 2px 0; }
+  .dash-side .big { font-size: 1.4em; }
+  .dash-topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .dash-topbar .controls { margin-bottom: 0; margin-top: 0; }
+  .compact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+  @media (max-width: 960px) {
+    .dash-layout { flex-direction: column; }
+    .dash-side { min-width: 0; max-width: none; position: static; max-height: none; }
+  }
   footer { margin-top: 30px; color: var(--dim); font-size: 0.75em; text-align: center; }
 
   /* Setup / Onboarding */
@@ -114,13 +130,35 @@
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  /* Settings */
-  .settings { max-width: 700px; }
+  /* Settings - sidebar layout */
+  .settings { display: flex; gap: 0; min-height: 500px; }
+  .settings-nav {
+    width: 180px; flex-shrink: 0; border-right: 1px solid var(--border);
+    padding-right: 0; display: flex; flex-direction: column; gap: 2px;
+  }
+  .settings-nav-item {
+    padding: 10px 16px; cursor: pointer; color: var(--dim);
+    font-size: 0.85em; font-weight: bold; border: none; background: none;
+    text-align: left; border-radius: 6px 0 0 6px; transition: all 0.15s;
+    font-family: inherit; white-space: nowrap;
+  }
+  .settings-nav-item:hover { color: var(--text); background: var(--surface); }
+  .settings-nav-item.active { color: var(--accent); background: var(--surface); border-right: 2px solid var(--accent); }
+  .settings-content { flex: 1; max-width: 600px; padding-left: 24px; }
+  .settings-panel { display: none; }
+  .settings-panel.active { display: block; }
   .settings-section { margin-bottom: 24px; }
   .settings-section h3 {
     color: var(--dim); font-size: 0.75em; text-transform: uppercase;
     letter-spacing: 0.1em; margin-bottom: 12px;
     padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  @media (max-width: 700px) {
+    .settings { flex-direction: column; }
+    .settings-nav { width: 100%; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px; }
+    .settings-nav-item { border-radius: 6px; }
+    .settings-nav-item.active { border-right: none; border-bottom: 2px solid var(--accent); }
+    .settings-content { padding-left: 0; }
   }
   .field { display: flex; align-items: center; margin-bottom: 10px; gap: 12px; }
   .field label { color: var(--dim); font-size: 0.85em; min-width: 180px; }
@@ -174,9 +212,33 @@
   .opt-warn.low { background: #0c2d6b22; border: 1px solid var(--blue); color: var(--blue); }
   .opt-warn.low .fix { color: #58a6ff88; }
   .opt-warn.info { background: var(--surface); border: 1px solid var(--border); color: var(--dim); }
+
+  /* Block Found Celebration */
+  .block-celebration {
+    position: fixed; top: 0; left: 0; right: 0;
+    background: linear-gradient(135deg, #f7931a, #ffd700);
+    color: #000; text-align: center; padding: 20px;
+    font-size: 1.3em; font-weight: bold;
+    z-index: 9999; transform: translateY(-100%);
+    transition: transform 0.5s ease;
+    box-shadow: 0 4px 20px rgba(247,147,26,0.5);
+  }
+  .block-celebration.show { transform: translateY(0); }
+  .block-celebration .dismiss {
+    background: rgba(0,0,0,0.15); border: none; color: #000;
+    padding: 6px 16px; border-radius: 4px; cursor: pointer;
+    font-family: inherit; font-size: 0.6em; margin-left: 16px;
+    vertical-align: middle;
+  }
+  .block-celebration .dismiss:hover { background: rgba(0,0,0,0.25); }
 </style>
 </head>
 <body>
+
+<div id="block-celebration" class="block-celebration">
+  <span id="block-celebration-text"></span>
+  <button class="dismiss" onclick="dismissBlockCelebration()">Dismiss</button>
+</div>
 
 <!-- ===== SETUP SCREEN ===== -->
 <div id="setup-screen" class="hidden">
@@ -189,8 +251,13 @@
       <h2>Option 1: Generate a New Wallet</h2>
       <p style="color:var(--dim);font-size:0.85em;margin-bottom:12px">
         We'll create a BIP39 wallet with a 12-word recovery phrase and a <code>bc1q</code> address.
-        No external software needed.
+        No external software needed. Choose a passphrase to encrypt the phrase on disk.
       </p>
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+        <input type="password" id="setup-pass" placeholder="Passphrase (8+ chars)" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 12px;font-family:inherit;font-size:0.9em;border-radius:6px;flex:1">
+        <input type="password" id="setup-pass2" placeholder="Confirm" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 12px;font-family:inherit;font-size:0.9em;border-radius:6px;flex:1">
+      </div>
+      <p id="setup-pass-error" style="color:var(--red);font-size:0.85em;margin-bottom:8px" class="hidden"></p>
       <button class="btn" onclick="generateWallet()">Generate New Wallet</button>
     </div>
 
@@ -240,162 +307,368 @@
 <div id="dashboard" class="hidden">
 <h1>mi-miner <span>Solo Bitcoin Miner</span></h1>
 <div class="tabs">
-  <button class="tab active" onclick="switchTab('mining')">Mining</button>
+  <button class="tab active" onclick="switchTab('mining')">Dashboard</button>
   <button class="tab" onclick="switchTab('settings')">Settings</button>
 </div>
 
-<!-- Mining Tab -->
+<!-- Mining Tab (Dashboard) -->
 <div id="tab-mining">
-<div id="wallet-bar" class="wallet-info hidden">Wallet: <span id="dash-address"></span></div>
-<div id="connection"><span class="status off" id="conn-dot"></span>Connecting...</div>
-<div class="controls" style="margin-top:12px">
-  <span class="mining-state running" id="mining-state">Running</span>
-  <button class="ctrl-btn resume hidden" id="btn-start" onclick="resumeMining()" style="background:var(--green);color:#000;border-color:var(--green)" title="Resume mining on all threads and GPU">Start</button>
-  <button class="ctrl-btn pause" id="btn-pause" onclick="pauseMining()" title="Temporarily pause all mining. Workers sleep until resumed.">Pause</button>
-  <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()" title="Resume mining from where it was paused">Resume</button>
-  <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()" title="Stop all mining. Click Start to begin again.">Stop</button>
+<div id="wallet-bar" class="hidden"></div><span id="dash-address" class="hidden"></span>
+
+<!-- Top bar: connection + controls -->
+<div class="dash-topbar">
+  <div id="connection"><span class="status off" id="conn-dot"></span>Connecting...</div>
+  <div class="controls" style="margin:0;gap:6px">
+    <span class="mining-state running" id="mining-state">Running</span>
+    <button class="ctrl-btn resume hidden" id="btn-start" onclick="resumeMining()" style="background:var(--green);color:#000;border-color:var(--green)" title="Resume mining">Start</button>
+    <button class="ctrl-btn pause" id="btn-pause" onclick="pauseMining()" title="Pause all mining">Pause</button>
+    <button class="ctrl-btn resume hidden" id="btn-resume" onclick="resumeMining()" title="Resume mining">Resume</button>
+    <button class="ctrl-btn stop" id="btn-stop" onclick="stopMining()" title="Stop all mining">Stop</button>
+  </div>
 </div>
 
-<!-- Optimization Warnings -->
 <div id="opt-warnings" class="opt-warnings"></div>
 
-<!-- System Info -->
-<div class="card" style="margin-bottom:16px">
-  <h2 title="Hardware and configuration detected on this machine">System</h2>
-  <div style="display:flex;flex-wrap:wrap;gap:24px;font-size:0.85em">
-    <div title="Operating system running the miner"><span class="label">Platform</span> <span id="sys-platform">-</span></div>
-    <div title="Number of high-performance CPU cores vs total (includes efficiency cores)"><span class="label">CPU</span> <span id="sys-cpu">-</span></div>
-    <div title="Graphics processor used for GPU-accelerated mining via Metal compute shaders"><span class="label">GPU</span> <span id="sys-gpu">-</span></div>
-    <div title="Total system memory"><span class="label">Memory</span> <span id="sys-mem">-</span></div>
-    <div title="Number of CPU mining threads currently active"><span class="label">Threads</span> <span id="sys-threads">-</span></div>
-    <div title="Whether GPU mining via Metal compute shaders is active"><span class="label">GPU Mining</span> <span id="sys-gpu-status">-</span></div>
-  </div>
-</div>
+<!-- Two-column layout -->
+<div class="dash-layout">
 
-<div class="grid">
-  <div class="card" title="Total hashing speed across all CPU threads and GPU combined">
-    <h2>Combined Hashrate</h2><div class="big" id="hashrate">-</div>
+<!-- ===== Left column: wallet, chart, metrics ===== -->
+<div class="dash-main">
+
+  <!-- Wallet -->
+  <div id="dash-wallet-card" class="card hidden">
+    <h2 title="Your Bitcoin wallet address and on-chain balance from mempool.space">Wallet</h2>
+    <div style="display:flex;gap:14px;align-items:flex-start">
+      <canvas id="dash-qr" width="100" height="100" style="border-radius:6px;background:#fff;padding:5px;flex-shrink:0;width:100px;height:100px"></canvas>
+      <div style="flex:1;min-width:0">
+        <div id="dash-wallet-addr" style="color:var(--blue);word-break:break-all;font-size:0.82em;margin-bottom:6px">-</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div><div style="color:var(--dim);font-size:0.7em;text-transform:uppercase">Confirmed</div><div id="dash-balance" style="font-size:1.1em;font-weight:bold;color:var(--accent)">--</div><div id="dash-balance-usd" style="color:var(--dim);font-size:0.75em"></div></div>
+          <div><div style="color:var(--dim);font-size:0.7em;text-transform:uppercase">Unconfirmed</div><div id="dash-unconfirmed" style="font-size:1.1em;color:var(--dim)">--</div></div>
+          <div><div style="color:var(--dim);font-size:0.7em;text-transform:uppercase">Transactions</div><div id="dash-tx-count" style="font-size:1.1em">--</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:6px;display:flex;gap:8px;align-items:center">
+      <button class="btn-secondary" onclick="dashWalletRefresh()" id="dash-wallet-refresh" style="padding:3px 10px;font-size:0.72em">Refresh</button>
+      <a id="dash-explorer-link" href="#" target="_blank" style="color:var(--blue);font-size:0.72em;text-decoration:none">mempool.space</a>
+    </div>
   </div>
-  <div class="card" title="Hashing speed from CPU threads using SHA-256d with ARM hardware acceleration">
-    <h2>CPU Hashrate</h2><div class="medium" id="cpu-hashrate">-</div>
-    <div class="row"><span class="label" title="Number of CPU threads actively mining">Threads</span><span id="threads">-</span></div>
-  </div>
-  <div class="card" title="Hashing speed from Metal GPU compute shaders (requires Xcode)">
-    <h2>GPU Hashrate</h2><div class="medium" id="gpu-hashrate">-</div>
-    <div class="row"><span class="label" title="Percentage of GPU capacity being used (0-100%). Reduced when user is active.">Intensity</span><span id="gpu-intensity">-</span></div>
-    <div class="bar-bg"><div class="bar-fill" id="gpu-bar" style="width:0%"></div></div>
-  </div>
+
+  <!-- Hashrate hero + chart -->
   <div class="card">
-    <h2 title="Cumulative mining statistics (persisted across restarts)">Mining Stats</h2>
-    <div class="row"><span class="label" title="Total number of SHA-256d hashes computed across all sessions">Total Hashes</span><span id="total-hashes">-</span></div>
-    <div class="row"><span class="label" title="Number of shares submitted to the mining pool">Shares</span><span id="shares">-</span></div>
-    <div class="row"><span class="label" title="Shares accepted by the pool as valid proof of work">Accepted</span><span id="accepted" class="active">-</span></div>
-    <div class="row"><span class="label" title="Shares rejected by the pool (stale, duplicate, or invalid)">Rejected</span><span id="rejected">-</span></div>
-    <div class="row"><span class="label" title="Number of Bitcoin blocks found. Each block earns ~3.125 BTC sent to your wallet.">Blocks Found</span><span id="blocks" style="color:var(--accent)">-</span></div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+      <h2>Hashrate</h2>
+      <div class="big" id="hashrate" style="font-size:1.6em">-</div>
+    </div>
+    <div style="display:flex;gap:16px;font-size:0.85em;margin-bottom:8px">
+      <div><span class="label">CPU</span> <span id="cpu-hashrate">-</span> <span class="label" style="margin-left:4px">(<span id="threads">-</span> threads)</span></div>
+      <div><span class="label">GPU</span> <span id="gpu-hashrate">-</span> <span class="label" style="margin-left:4px"><span id="gpu-intensity">-</span></span></div>
+    </div>
+    <div class="bar-bg" style="margin-bottom:8px"><div class="bar-fill" id="gpu-bar" style="width:0%"></div></div>
+    <canvas id="hashrate-chart" style="width:100%;height:140px"></canvas>
   </div>
+
+  <!-- Compact metrics grid -->
+  <div class="compact-grid">
+    <div class="card">
+      <h2 title="Cumulative mining statistics (persisted across restarts)">Mining Stats</h2>
+      <div class="row"><span class="label">Total Hashes</span><span id="total-hashes">-</span></div>
+      <div class="row"><span class="label">Shares</span><span id="shares">-</span></div>
+      <div class="row"><span class="label">Accepted</span><span id="accepted" class="active">-</span></div>
+      <div class="row"><span class="label">Rejected</span><span id="rejected">-</span></div>
+      <div class="row"><span class="label">Blocks Found</span><span id="blocks" style="color:var(--accent)">-</span></div>
+    </div>
+    <div class="card">
+      <h2>System</h2>
+      <div class="row"><span class="label">Status</span><span id="activity">-</span></div>
+      <div class="row"><span class="label">Idle Time</span><span id="idle-time">-</span></div>
+      <div class="row"><span class="label">Uptime</span><span id="uptime">-</span></div>
+      <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">
+        <div class="row"><span class="label">Power</span><span id="power-total">-</span></div>
+        <div class="row" style="font-size:0.85em"><span class="label">CPU / GPU / DRAM</span><span><span id="power-cpu">-</span> / <span id="power-gpu">-</span> / <span id="power-dram">-</span></span></div>
+        <span id="power-ane" class="hidden"></span>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">
+        <div class="row"><span class="label">Cost / Day</span><span id="cost-day">-</span></div>
+        <div class="row"><span class="label">Cost / Month</span><span id="cost-month">-</span></div>
+        <span id="cost-hour" class="hidden"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden system info elements (populated by loadHardware, not displayed in new layout) -->
+  <div class="hidden">
+    <span id="sys-platform"></span><span id="sys-cpu"></span><span id="sys-gpu"></span>
+    <span id="sys-mem"></span><span id="sys-threads"></span><span id="sys-gpu-status"></span>
+  </div>
+</div>
+
+<!-- ===== Right column: analysis ===== -->
+<div class="dash-side">
   <div class="card">
-    <h2 title="User activity detection for adaptive throttling">Activity</h2>
-    <div class="row"><span class="label" title="Whether keyboard/mouse input has been detected recently">Status</span><span id="activity">-</span></div>
-    <div class="row"><span class="label" title="Seconds since last keyboard or mouse input">Idle Time</span><span id="idle-time">-</span></div>
-    <div class="row"><span class="label" title="How long the miner has been running this session">Uptime</span><span id="uptime">-</span></div>
+    <h2>Mining Difficulty</h2>
+    <div class="row"><span class="label">Network</span><span id="net-difficulty">-</span></div>
+    <div class="row"><span class="label">Network Hashrate</span><span id="net-hashrate">-</span></div>
+    <div class="row"><span class="label">Pool Share Diff</span><span id="pool-difficulty">-</span></div>
+    <div class="row"><span class="label">Your Share</span><span id="net-share">-</span></div>
+    <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">
+      <div class="row"><span class="label">Est. Earnings / Day</span><span id="earn-day">-</span></div>
+      <div class="row"><span class="label">Est. Profit / Day</span><span id="profit-day">-</span></div>
+    </div>
+    <div id="viability-note" style="margin-top:8px;padding:8px;border-radius:4px;font-size:0.82em;background:var(--bg);display:none"></div>
+  </div>
+
+  <div class="card">
+    <h2>Expected Time to Block</h2>
+    <p style="color:var(--dim);font-size:0.75em;margin-bottom:10px">
+      Solo mining is a lottery &mdash; no partial rewards. Full ~3.125 BTC or nothing.
+    </p>
+    <div id="prob-display" style="font-size:0.85em">
+      <div style="color:var(--dim)">Waiting for hashrate data...</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Mining Advisor</h2>
+    <div id="advisor-display" style="font-size:0.85em">
+      <div style="color:var(--dim)">Collecting data...</div>
+    </div>
   </div>
 </div>
 
-<!-- Hashrate Timeline -->
-<div class="card" style="margin-top:4px;margin-bottom:4px">
-  <h2 title="Rolling history of combined hashrate over the last 5 minutes">Hashrate Timeline</h2>
-  <canvas id="hashrate-chart" style="width:100%;height:160px"></canvas>
+</div><!-- end dash-layout -->
 </div>
 
-<!-- Block Probability -->
-<div class="card" style="margin-top:4px">
-  <h2 title="Statistical estimate of how long you'd need to mine continuously at current hashrate to find a Bitcoin block">Expected Time to Find a Block</h2>
-  <p style="color:var(--dim);font-size:0.8em;margin-bottom:14px">
-    Based on current hashrate vs network (~700 EH/s). Block finding follows a Poisson process &mdash;
-    the mean time is shown with &plusmn;1&sigma;, 2&sigma;, and 3&sigma; ranges.
-  </p>
-  <div id="prob-display" style="font-size:0.9em">
-    <div style="color:var(--dim)">Waiting for hashrate data...</div>
+<!-- Old Wallet Tab (hidden, content moved to settings sidebar) -->
+<div id="tab-wallet" class="hidden">
+<div style="max-width:700px">
+
+  <div id="wt-no-wallet" class="hidden" style="text-align:center;padding:40px 0;color:var(--dim)">
+    <p style="font-size:1.1em;margin-bottom:12px">No wallet configured</p>
+    <p>Go to <a href="#" onclick="switchTab('settings');return false" style="color:var(--accent)">Settings</a> to set up a wallet.</p>
   </div>
+
+  <div id="wt-content" class="hidden">
+
+    <!-- Address card -->
+    <div class="card" style="margin-bottom:16px">
+      <h2>Address</h2>
+      <div style="display:flex;gap:16px;align-items:flex-start">
+        <canvas id="wt-qr" width="160" height="160" style="border-radius:6px;background:#fff;padding:8px;flex-shrink:0;width:160px;height:160px"></canvas>
+        <div style="flex:1;min-width:0">
+          <div id="wt-address" style="color:var(--blue);word-break:break-all;font-size:0.95em"></div>
+          <div id="wt-type" style="color:var(--dim);font-size:0.75em;margin-top:6px"></div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button class="btn-secondary" onclick="wmCopy('wt-address',this)" style="padding:6px 12px;font-size:0.8em">Copy</button>
+            <a id="wt-explorer-link" href="#" target="_blank" class="btn-secondary" style="padding:6px 12px;font-size:0.8em;text-decoration:none;display:inline-block">mempool.space</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Balance card -->
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+      <div class="card">
+        <h2>Confirmed Balance</h2>
+        <div class="big" id="wt-balance-btc" style="font-size:1.6em">--</div>
+        <div id="wt-balance-usd" style="color:var(--dim);font-size:0.85em;margin-top:4px"></div>
+      </div>
+      <div class="card">
+        <h2>Unconfirmed</h2>
+        <div class="medium" id="wt-unconfirmed" style="color:var(--dim)">--</div>
+        <div id="wt-unconfirmed-usd" style="color:var(--dim);font-size:0.85em;margin-top:4px"></div>
+      </div>
+      <div class="card">
+        <h2>Transactions</h2>
+        <div class="medium" id="wt-tx-count">--</div>
+        <div style="color:var(--dim);font-size:0.85em;margin-top:4px">on-chain</div>
+      </div>
+    </div>
+
+    <!-- Recent transactions -->
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h2 style="margin-bottom:0">Recent Transactions</h2>
+        <button class="btn-secondary" onclick="wtRefresh()" id="wt-refresh-btn" style="padding:4px 12px;font-size:0.75em">Refresh</button>
+      </div>
+      <div id="wt-tx-list" style="font-size:0.85em;color:var(--dim)">Loading...</div>
+    </div>
+
+    <div id="wt-error" style="color:var(--red);font-size:0.85em;margin-top:12px"></div>
+    <div style="color:var(--dim);font-size:0.75em;margin-top:12px;text-align:center">
+      Data from <a href="https://mempool.space" target="_blank" style="color:var(--blue);text-decoration:none">mempool.space</a>
+    </div>
+  </div>
+
 </div>
 </div>
 
 <!-- Settings Tab -->
 <div id="tab-settings" class="hidden">
 <div class="settings">
+  <nav class="settings-nav">
+    <button class="settings-nav-item active" onclick="switchSettingsPanel('wallet',this)">Wallet</button>
+    <button class="settings-nav-item" onclick="switchSettingsPanel('hardware',this)">Hardware</button>
+    <button class="settings-nav-item" onclick="switchSettingsPanel('pool',this)">Pool</button>
+    <button class="settings-nav-item" onclick="switchSettingsPanel('behavior',this)">Behavior</button>
+    <button class="settings-nav-item" onclick="switchSettingsPanel('dashboard-cfg',this)">Dashboard</button>
+    <button class="settings-nav-item" onclick="switchSettingsPanel('logging',this)">Logging</button>
+  </nav>
+  <div class="settings-content">
 
-  <div class="settings-section">
-    <h3 title="Detected hardware capabilities on this machine">Hardware Detection</h3>
-    <div id="hw-info" style="color:var(--dim);font-size:0.85em;margin-bottom:12px;">Detecting...</div>
-    <button class="test-btn" id="btn-auto-config" onclick="autoConfig()" title="Detect hardware and set optimal mining configuration automatically">Auto Configure</button>
-    <span class="save-msg" id="auto-msg"></span>
-    <div id="auto-result"></div>
-  </div>
-
-  <div class="settings-section">
-    <h3 title="CPU mining thread configuration">Mining</h3>
-    <div class="field"><label title="Number of OS threads dedicated to SHA-256d hashing. Best set to your performance core count.">CPU Threads</label><input type="number" id="cfg-threads" min="1" max="128"></div>
-    <div class="field"><label title="Disable GPU mining and use only CPU threads. Useful if GPU causes instability.">CPU Only</label><input type="checkbox" id="cfg-cpu-only"></div>
-    <div class="field"><label title="Disable CPU mining and use only GPU. CPU threads will not hash.">GPU Only</label><input type="checkbox" id="cfg-gpu-only"></div>
-  </div>
-
-  <div class="settings-section">
-    <h3 title="Metal compute shader GPU mining configuration (Apple Silicon)">GPU</h3>
-    <div class="field"><label title="Enable or disable GPU mining via Metal compute shaders. Requires Xcode.">GPU Enabled</label><input type="checkbox" id="cfg-gpu-enabled"></div>
-    <div class="field"><label title="How much GPU capacity to use (0-100%). Lower values reduce heat and UI lag. Higher values increase hashrate.">GPU Intensity</label><input type="range" id="cfg-gpu-intensity" min="0" max="100" step="5"><span class="range-val" id="cfg-gpu-intensity-val">100%</span></div>
-    <div class="field"><label title="Number of nonces per GPU dispatch as a power of 2. Default 24 = ~16 million nonces per batch. Higher = more throughput but longer per-batch latency.">Batch Size (log2)</label><input type="number" id="cfg-gpu-batch" min="18" max="28"></div>
-  </div>
-
-  <div class="settings-section">
-    <h3 title="Connection settings for the Stratum v1 mining pool">Stratum (Pool)</h3>
-    <div class="field"><label title="Stratum pool URL. Default connects to solo.ckpool.org for solo mining (full block reward).">URL</label><input type="text" id="cfg-stratum-url"></div>
-    <div class="field"><label title="Your Bitcoin address followed by a worker name (e.g., bc1q...address.mi-miner). The pool sends block rewards to this address.">Worker</label><input type="text" id="cfg-stratum-worker"></div>
-    <div class="field"><label title="Pool password. Usually 'x' for solo mining pools.">Password</label><input type="password" id="cfg-stratum-pass"></div>
-    <button class="test-btn" id="btn-test-conn" onclick="testConnection()" title="Test TCP connection to the stratum pool server">Test Connection</button>
-    <div id="conn-result"></div>
-  </div>
-
-  <div class="settings-section">
-    <h3 title="Automatically reduce mining intensity when you're using the computer, and ramp up when idle">Activity Throttling</h3>
-    <div class="field"><label title="Enable or disable automatic throttling based on keyboard/mouse activity">Enabled</label><input type="checkbox" id="cfg-activity-enabled"></div>
-    <div class="field"><label title="Seconds of no keyboard/mouse input before mining ramps up to full speed">Idle Timeout (sec)</label><input type="number" id="cfg-idle-timeout" min="10" max="3600"></div>
-    <div class="field"><label title="Minimum CPU threads to keep mining with while user is actively using the computer">Min Threads (active)</label><input type="number" id="cfg-min-threads" min="0" max="128"></div>
-    <div class="field"><label title="Minimum GPU intensity while user is active. Keeps GPU barely ticking to avoid pipeline stalls on resume.">Min GPU Intensity (active)</label><input type="range" id="cfg-min-gpu" min="0" max="100" step="5"><span class="range-val" id="cfg-min-gpu-val">10%</span></div>
-    <div class="field"><label title="How many seconds to gradually ramp up to full speed after user goes idle. Prevents sudden load spike.">Ramp Up (sec)</label><input type="number" id="cfg-ramp-up" min="0" max="300"></div>
-    <div class="field"><label title="How many seconds to ramp down when user becomes active. Fast ramp-down avoids disturbing the user.">Ramp Down (sec)</label><input type="number" id="cfg-ramp-down" min="0" max="60"></div>
-    <div class="field"><label title="Don't ramp up to full speed if system CPU usage (from other apps) is above this percentage. Prevents overloading during builds or renders.">CPU Threshold %</label><input type="number" id="cfg-cpu-thresh" min="0" max="100"></div>
-  </div>
-
-  <div class="settings-section">
-    <h3 title="Web dashboard server settings">Web Dashboard</h3>
-    <div class="field"><label title="IP address and port the dashboard listens on. Use 127.0.0.1 for local-only access. Requires restart to change.">Bind Address</label><input type="text" id="cfg-web-bind"></div>
-  </div>
-
-  <div class="settings-section">
-    <h3 title="Application logging verbosity">Logging</h3>
-    <div class="field"><label title="Log detail level. 'info' is recommended. 'debug' and 'trace' produce verbose output useful for troubleshooting.">Level</label>
-      <select id="cfg-log-level" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:0.85em;border-radius:4px;">
-        <option value="trace">trace</option>
-        <option value="debug">debug</option>
-        <option value="info">info</option>
-        <option value="warn">warn</option>
-        <option value="error">error</option>
-      </select>
+    <!-- ===== Wallet ===== -->
+    <div id="sp-wallet" class="settings-panel active">
+      <div id="wallet-mgmt">
+        <div id="wallet-status-card" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;margin-bottom:14px">
+          <div><div style="font-size:0.8em;color:var(--dim);margin-bottom:4px">Current Address</div>
+          <div id="wm-address" style="color:var(--blue);word-break:break-all;font-size:0.9em">Loading...</div>
+          <div id="wm-type" style="color:var(--dim);font-size:0.75em;margin-top:4px"></div></div>
+        </div>
+        <div id="wm-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <button class="btn-secondary" id="wm-btn-show" onclick="wmShowPhrase()" style="display:none">View Recovery Phrase</button>
+          <button class="btn-secondary" onclick="wmTogglePanel('generate')">Generate New Wallet</button>
+          <button class="btn-secondary" onclick="wmTogglePanel('restore')">Restore from Phrase</button>
+          <button class="btn-secondary" onclick="wmTogglePanel('external')">Use External Address</button>
+        </div>
+        <div id="wm-panel-generate" class="hidden" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:14px">
+          <div style="font-size:0.85em;margin-bottom:12px;color:var(--dim)">Generate a new BIP39 wallet with a 12-word recovery phrase and <code>bc1q</code> address.</div>
+          <div id="wm-gen-warning" class="warning hidden" style="margin-bottom:12px"><strong>Warning</strong>This will replace your current wallet. Make sure you have backed up your existing recovery phrase before proceeding.</div>
+          <div class="field" style="margin-bottom:10px"><label style="min-width:120px" title="Passphrase to encrypt the recovery phrase on disk.">Passphrase</label><input type="password" id="wm-gen-pass" placeholder="Enter a passphrase" style="max-width:250px"></div>
+          <div class="field" style="margin-bottom:12px"><label style="min-width:120px">Confirm</label><input type="password" id="wm-gen-pass2" placeholder="Confirm passphrase" style="max-width:250px"></div>
+          <button class="btn" id="wm-btn-gen" onclick="wmGenerate()" style="padding:10px 20px;font-size:0.85em">Generate Wallet</button>
+          <span class="save-msg" id="wm-gen-msg"></span>
+          <div id="wm-gen-result" class="hidden" style="margin-top:14px">
+            <div style="font-size:0.8em;color:var(--dim);margin-bottom:6px">Recovery Phrase</div>
+            <div class="mnemonic-box" id="wm-gen-words" style="font-size:1em;margin:0 0 10px 0"></div>
+            <button class="btn-secondary" onclick="wmCopy('wm-gen-words',this)" style="margin-bottom:10px">Copy to Clipboard</button>
+            <div style="font-size:0.8em;color:var(--dim);margin-bottom:4px">Address</div>
+            <div class="address-box" id="wm-gen-address" style="margin:0 0 10px 0"></div>
+            <div class="warning"><strong>IMPORTANT</strong>Write down these 12 words on paper and store them somewhere safe. If you lose them and find a block, the Bitcoin is gone forever.</div>
+          </div>
+        </div>
+        <div id="wm-panel-restore" class="hidden" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:14px">
+          <div style="font-size:0.85em;margin-bottom:12px;color:var(--dim)">Restore an existing wallet by entering your 12-word BIP39 recovery phrase.</div>
+          <textarea id="wm-restore-input" rows="3" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px;font-family:inherit;font-size:0.9em;border-radius:6px;resize:vertical;margin-bottom:10px" placeholder="word1 word2 word3 ... word12" spellcheck="false" autocomplete="off"></textarea>
+          <div class="field" style="margin-bottom:10px"><label style="min-width:120px">Passphrase</label><input type="password" id="wm-restore-pass" placeholder="Enter a passphrase" style="max-width:250px"></div>
+          <div class="field" style="margin-bottom:12px"><label style="min-width:120px">Confirm</label><input type="password" id="wm-restore-pass2" placeholder="Confirm passphrase" style="max-width:250px"></div>
+          <div style="display:flex;gap:8px;align-items:center"><button class="btn" id="wm-btn-restore" onclick="wmRestore()" style="padding:10px 20px;font-size:0.85em">Restore Wallet</button><span class="save-msg" id="wm-restore-msg"></span></div>
+        </div>
+        <div id="wm-panel-external" class="hidden" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:14px">
+          <div style="font-size:0.85em;margin-bottom:12px;color:var(--dim)">Use a Bitcoin address from an external wallet (Sparrow, Electrum, Ledger, Coinbase, etc.).</div>
+          <div style="display:flex;gap:8px"><input type="text" id="wm-ext-address" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px;font-family:inherit;font-size:0.85em;border-radius:6px;flex:1" placeholder="bc1q... or 1... or 3..." autocomplete="off" spellcheck="false"><button class="btn" id="wm-btn-ext" onclick="wmSetExternal()" style="padding:10px 20px;font-size:0.85em">Save</button></div>
+          <span class="save-msg" id="wm-ext-msg" style="display:inline-block;margin-top:8px"></span>
+        </div>
+        <div id="wm-panel-phrase" class="hidden" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:14px">
+          <div id="wm-phrase-unlock" style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+            <input type="password" id="wm-phrase-pass" placeholder="Enter passphrase" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:0.85em;border-radius:4px;flex:1;max-width:250px" onkeydown="if(event.key==='Enter')wmDecryptPhrase()">
+            <button class="btn" onclick="wmDecryptPhrase()" style="padding:8px 16px;font-size:0.85em">Unlock</button>
+            <span class="save-msg" id="wm-phrase-msg"></span>
+          </div>
+          <div id="wm-phrase-content" class="hidden">
+            <div style="font-size:0.8em;color:var(--dim);margin-bottom:6px">Recovery Phrase</div>
+            <div class="mnemonic-box" id="wm-phrase-words" style="font-size:1em;margin:0 0 10px 0"></div>
+            <button class="btn-secondary" onclick="wmCopy('wm-phrase-words',this)">Copy to Clipboard</button>
+            <div class="warning" style="margin-top:10px"><strong>Keep these words secret.</strong>Anyone with this phrase can spend your Bitcoin.</div>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <div class="settings-section">
-    <h3>Diagnostics</h3>
-    <button class="test-btn" id="btn-test-bench" onclick="testBenchmark()" title="Run a 3-second single-core CPU benchmark to measure hashing speed on this machine">Run Quick Benchmark (3s)</button>
-    <div id="bench-result"></div>
-  </div>
+    <!-- ===== Hardware ===== -->
+    <div id="sp-hardware" class="settings-panel">
+      <div class="settings-section">
+        <h3>Hardware Detection</h3>
+        <div id="hw-info" style="color:var(--dim);font-size:0.85em;margin-bottom:12px;">Detecting...</div>
+        <button class="test-btn" id="btn-auto-config" onclick="autoConfig()" title="Detect hardware and set optimal mining configuration automatically">Auto Configure</button>
+        <span class="save-msg" id="auto-msg"></span>
+        <div id="auto-result"></div>
+      </div>
+      <div class="settings-section">
+        <h3>CPU</h3>
+        <div class="field"><label title="Number of OS threads dedicated to SHA-256d hashing. Best set to your performance core count.">CPU Threads</label><input type="number" id="cfg-threads" min="1" max="128"></div>
+        <div class="field"><label title="Disable GPU mining and use only CPU threads.">CPU Only</label><input type="checkbox" id="cfg-cpu-only"></div>
+        <div class="field"><label title="Disable CPU mining and use only GPU.">GPU Only</label><input type="checkbox" id="cfg-gpu-only"></div>
+      </div>
+      <div class="settings-section">
+        <h3>GPU</h3>
+        <div class="field"><label title="Enable or disable GPU mining via Metal compute shaders. Requires Xcode.">GPU Enabled</label><input type="checkbox" id="cfg-gpu-enabled"></div>
+        <div class="field"><label title="How much GPU capacity to use (0-100%).">GPU Intensity</label><input type="range" id="cfg-gpu-intensity" min="0" max="100" step="5"><span class="range-val" id="cfg-gpu-intensity-val">100%</span></div>
+        <div class="field"><label title="Number of nonces per GPU dispatch as a power of 2. Default 24 = ~16M nonces per batch.">Batch Size (log2)</label><input type="number" id="cfg-gpu-batch" min="18" max="28"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Benchmark</h3>
+        <button class="test-btn" id="btn-test-bench" onclick="testBenchmark()" title="Run a 3-second single-core CPU benchmark">Run Quick Benchmark (3s)</button>
+        <div id="bench-result"></div>
+      </div>
+    </div>
 
-  <div class="settings-actions">
-    <button class="save-btn" id="btn-save" onclick="saveConfig()">Save Configuration</button>
-    <span class="save-msg" id="save-msg"></span>
-  </div>
-  <p class="restart-note" style="margin-top:10px">Some changes (stratum, bind address) require a restart to take effect.</p>
+    <!-- ===== Pool ===== -->
+    <div id="sp-pool" class="settings-panel">
+      <div class="settings-section">
+        <h3>Pool Selection</h3>
+        <p style="color:var(--dim);font-size:0.82em;margin-bottom:12px">Choose a pool below. The stratum URL, worker, and password are set automatically.</p>
+        <div id="pool-list" style="display:flex;flex-direction:column;gap:8px">Loading pools...</div>
+      </div>
+      <div class="settings-section">
+        <h3>Connection</h3>
+        <div class="field"><label title="Stratum pool URL.">URL</label><input type="text" id="cfg-stratum-url"></div>
+        <div class="field"><label title="Derived from your wallet address.">Worker</label><input type="text" id="cfg-stratum-worker" readonly style="opacity:0.7;cursor:not-allowed" title="Derived from your wallet address — change it in Wallet"></div>
+        <div class="field"><label title="Set automatically by pool selection.">Password</label><input type="text" id="cfg-stratum-pass" readonly style="opacity:0.7;cursor:not-allowed" title="Set automatically by pool selection"></div>
+        <button class="test-btn" id="btn-test-conn" onclick="testConnection()" title="Test TCP connection to the stratum pool server">Test Connection</button>
+        <div id="conn-result"></div>
+      </div>
+    </div>
 
+    <!-- ===== Behavior ===== -->
+    <div id="sp-behavior" class="settings-panel">
+      <div class="settings-section">
+        <h3>Activity Throttling</h3>
+        <div class="field"><label title="Enable or disable automatic throttling based on keyboard/mouse activity">Enabled</label><input type="checkbox" id="cfg-activity-enabled"></div>
+        <div class="field"><label title="Seconds of no input before mining ramps up to full speed">Idle Timeout (sec)</label><input type="number" id="cfg-idle-timeout" min="10" max="3600"></div>
+        <div class="field"><label title="Minimum CPU threads while user is active">Min Threads (active)</label><input type="number" id="cfg-min-threads" min="0" max="128"></div>
+        <div class="field"><label title="Minimum GPU intensity while user is active">Min GPU Intensity</label><input type="range" id="cfg-min-gpu" min="0" max="100" step="5"><span class="range-val" id="cfg-min-gpu-val">10%</span></div>
+        <div class="field"><label title="Seconds to gradually ramp up after user goes idle">Ramp Up (sec)</label><input type="number" id="cfg-ramp-up" min="0" max="300"></div>
+        <div class="field"><label title="Seconds to ramp down when user becomes active">Ramp Down (sec)</label><input type="number" id="cfg-ramp-down" min="0" max="60"></div>
+        <div class="field"><label title="Don't ramp up if system CPU usage is above this %">CPU Threshold %</label><input type="number" id="cfg-cpu-thresh" min="0" max="100"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Cost</h3>
+        <div class="field"><label title="Your electricity cost per kilowatt-hour in USD. US average is ~$0.12.">Electricity ($/kWh)</label><input type="number" id="cfg-elec-cost" min="0" max="1" step="0.01"></div>
+      </div>
+    </div>
+
+    <!-- ===== Dashboard ===== -->
+    <div id="sp-dashboard-cfg" class="settings-panel">
+      <div class="settings-section">
+        <h3>Web Server</h3>
+        <div class="field"><label title="IP and port the dashboard listens on. Requires restart to change.">Bind Address</label><input type="text" id="cfg-web-bind"></div>
+      </div>
+    </div>
+
+    <!-- ===== Logging ===== -->
+    <div id="sp-logging" class="settings-panel">
+      <div class="settings-section">
+        <h3>Log Level</h3>
+        <div class="field"><label title="'info' is recommended. 'debug'/'trace' produce verbose output for troubleshooting.">Level</label>
+          <select id="cfg-log-level" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;font-family:inherit;font-size:0.85em;border-radius:4px;">
+            <option value="trace">trace</option>
+            <option value="debug">debug</option>
+            <option value="info">info</option>
+            <option value="warn">warn</option>
+            <option value="error">error</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save button (always visible) -->
+    <div class="settings-actions">
+      <button class="save-btn" id="btn-save" onclick="saveConfig()">Save Configuration</button>
+      <span class="save-msg" id="save-msg"></span>
+    </div>
+    <p class="restart-note" style="margin-top:10px">Some changes (pool, bind address) require a restart to take effect.</p>
+  </div>
 </div>
 </div>
 
@@ -449,6 +722,7 @@ function setExistingAddress() {
         walletAddress = address;
         okEl.textContent = 'Address saved. Restart the miner to connect with this address.';
         okEl.classList.remove('hidden');
+        loadConfig(); // sync stratum worker with new address
         setTimeout(function(){ showDashboard(); }, 1500);
       } else {
         errEl.textContent = d.error || 'Invalid address.';
@@ -461,16 +735,26 @@ function setExistingAddress() {
 }
 
 function generateWallet() {
-  var btn = event.target; btn.disabled = true; btn.textContent = 'Generating...';
-  fetch('/api/wallet/generate',{method:'POST'}).then(function(r){return r.json()}).then(function(d) {
+  var btn = event.target;
+  var pass = document.getElementById('setup-pass').value;
+  var pass2 = document.getElementById('setup-pass2').value;
+  var errEl = document.getElementById('setup-pass-error');
+  errEl.classList.add('hidden');
+
+  if (!pass || pass.length < 8) { errEl.textContent = 'Passphrase must be at least 8 characters.'; errEl.classList.remove('hidden'); return; }
+  if (pass !== pass2) { errEl.textContent = 'Passphrases do not match.'; errEl.classList.remove('hidden'); return; }
+
+  btn.disabled = true; btn.textContent = 'Generating...';
+  fetch('/api/wallet/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({passphrase:pass})}).then(function(r){return r.json()}).then(function(d) {
     if (d.success) {
       walletWords = d.mnemonic.split(' '); walletAddress = d.address;
       document.getElementById('mnemonic-words').textContent = d.mnemonic;
       document.getElementById('wallet-address').textContent = d.address;
       document.getElementById('step-welcome').classList.add('hidden');
       document.getElementById('step-mnemonic').classList.remove('hidden');
-    } else { btn.disabled=false; btn.textContent='Generate Wallet'; alert('Error: '+(d.error||'Unknown')); }
-  }).catch(function(e){ btn.disabled=false; btn.textContent='Generate Wallet'; alert('Error: '+e); });
+      loadConfig();
+    } else { btn.disabled=false; btn.textContent='Generate New Wallet'; errEl.textContent=d.error||'Unknown error'; errEl.classList.remove('hidden'); }
+  }).catch(function(e){ btn.disabled=false; btn.textContent='Generate New Wallet'; errEl.textContent='Error: '+e; errEl.classList.remove('hidden'); });
 }
 function showConfirm() {
   confirmIndex = 1 + Math.floor(Math.random()*(walletWords.length-2));
@@ -486,6 +770,188 @@ function verifyWord() {
   else { document.getElementById('confirm-error').classList.remove('hidden'); document.getElementById('confirm-input').value=''; document.getElementById('confirm-input').focus(); }
 }
 
+/* ========== Wallet Management (Settings) ========== */
+var wmActivePanel = '';
+
+function wmLoadStatus() {
+  fetch('/api/wallet').then(function(r){return r.json()}).then(function(d) {
+    var addrEl = document.getElementById('wm-address');
+    var typeEl = document.getElementById('wm-type');
+    var showBtn = document.getElementById('wm-btn-show');
+    var genWarn = document.getElementById('wm-gen-warning');
+
+    if (d.exists && d.address) {
+      addrEl.textContent = d.address;
+      addrEl.style.color = 'var(--blue)';
+      if (d.has_mnemonic) {
+        typeEl.textContent = 'Generated wallet (BIP39/BIP84) — passphrase protected';
+        showBtn.style.display = '';
+      } else {
+        typeEl.textContent = 'External address';
+        showBtn.style.display = 'none';
+      }
+      genWarn.classList.remove('hidden');
+    } else {
+      addrEl.textContent = 'No wallet configured';
+      addrEl.style.color = 'var(--dim)';
+      typeEl.textContent = '';
+      showBtn.style.display = 'none';
+      genWarn.classList.add('hidden');
+    }
+  });
+}
+
+function wmTogglePanel(name) {
+  var panels = ['generate','restore','external','phrase'];
+  for (var i = 0; i < panels.length; i++) {
+    var el = document.getElementById('wm-panel-' + panels[i]);
+    if (el) el.classList.toggle('hidden', panels[i] !== name || wmActivePanel === name);
+  }
+  wmActivePanel = wmActivePanel === name ? '' : name;
+}
+
+function wmShowPhrase() {
+  wmTogglePanel('phrase');
+  if (wmActivePanel === 'phrase') {
+    // Reset state
+    document.getElementById('wm-phrase-pass').value = '';
+    document.getElementById('wm-phrase-msg').textContent = '';
+    document.getElementById('wm-phrase-content').classList.add('hidden');
+    document.getElementById('wm-phrase-unlock').style.display = 'flex';
+    document.getElementById('wm-phrase-pass').focus();
+  }
+}
+
+function wmDecryptPhrase() {
+  var pass = document.getElementById('wm-phrase-pass').value;
+  var msg = document.getElementById('wm-phrase-msg');
+  if (!pass) { msg.textContent = 'Enter passphrase.'; msg.className = 'save-msg err'; return; }
+
+  msg.textContent = 'Decrypting...'; msg.className = 'save-msg';
+
+  fetch('/api/wallet/mnemonic', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({passphrase: pass})})
+    .then(function(r){return r.json()}).then(function(d) {
+      if (d.success && d.mnemonic) {
+        document.getElementById('wm-phrase-words').textContent = d.mnemonic;
+        document.getElementById('wm-phrase-content').classList.remove('hidden');
+        document.getElementById('wm-phrase-unlock').style.display = 'none';
+        msg.textContent = '';
+      } else {
+        msg.textContent = d.error || 'Failed to decrypt';
+        msg.className = 'save-msg err';
+      }
+    }).catch(function(e) { msg.textContent = 'Error: '+e; msg.className = 'save-msg err'; });
+}
+
+function wmGenerate() {
+  var btn = document.getElementById('wm-btn-gen');
+  var msg = document.getElementById('wm-gen-msg');
+  var pass = document.getElementById('wm-gen-pass').value;
+  var pass2 = document.getElementById('wm-gen-pass2').value;
+
+  if (!pass) { msg.textContent = 'Passphrase is required.'; msg.className = 'save-msg err'; return; }
+  if (pass.length < 8) { msg.textContent = 'Passphrase must be at least 8 characters.'; msg.className = 'save-msg err'; return; }
+  if (pass !== pass2) { msg.textContent = 'Passphrases do not match.'; msg.className = 'save-msg err'; return; }
+
+  btn.disabled = true; msg.textContent = 'Generating...'; msg.className = 'save-msg';
+
+  fetch('/api/wallet/generate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({passphrase: pass})}).then(function(r){return r.json()}).then(function(d) {
+    btn.disabled = false;
+    if (d.success) {
+      msg.textContent = ''; msg.className = 'save-msg ok';
+      document.getElementById('wm-gen-words').textContent = d.mnemonic;
+      document.getElementById('wm-gen-address').textContent = d.address;
+      document.getElementById('wm-gen-result').classList.remove('hidden');
+      walletAddress = d.address;
+      document.getElementById('dash-address').textContent = d.address;
+      wmLoadStatus();
+      loadConfig(); // sync stratum worker with new wallet address
+    } else {
+      msg.textContent = 'Error: ' + (d.error || 'Unknown');
+      msg.className = 'save-msg err';
+    }
+  }).catch(function(e) { btn.disabled = false; msg.textContent = 'Error: '+e; msg.className = 'save-msg err'; });
+}
+
+function wmRestore() {
+  var btn = document.getElementById('wm-btn-restore');
+  var msg = document.getElementById('wm-restore-msg');
+  var input = document.getElementById('wm-restore-input').value.trim();
+  var pass = document.getElementById('wm-restore-pass').value;
+  var pass2 = document.getElementById('wm-restore-pass2').value;
+
+  if (!input) { msg.textContent = 'Enter your 12-word phrase.'; msg.className = 'save-msg err'; return; }
+
+  var words = input.split(/\s+/);
+  if (words.length !== 12) { msg.textContent = 'Expected 12 words, got ' + words.length + '.'; msg.className = 'save-msg err'; return; }
+  if (!pass) { msg.textContent = 'Passphrase is required.'; msg.className = 'save-msg err'; return; }
+  if (pass.length < 8) { msg.textContent = 'Passphrase must be at least 8 characters.'; msg.className = 'save-msg err'; return; }
+  if (pass !== pass2) { msg.textContent = 'Passphrases do not match.'; msg.className = 'save-msg err'; return; }
+
+  btn.disabled = true; msg.textContent = 'Restoring...'; msg.className = 'save-msg';
+
+  fetch('/api/wallet/restore', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mnemonic: input, passphrase: pass})})
+    .then(function(r){return r.json()}).then(function(d) {
+      btn.disabled = false;
+      if (d.success) {
+        msg.textContent = 'Restored! Address: ' + d.address;
+        msg.className = 'save-msg ok';
+        walletAddress = d.address;
+        document.getElementById('dash-address').textContent = d.address;
+        document.getElementById('wm-restore-input').value = '';
+        wmLoadStatus();
+        loadConfig(); // sync stratum worker with restored wallet address
+      } else {
+        msg.textContent = 'Error: ' + (d.error || 'Invalid phrase');
+        msg.className = 'save-msg err';
+      }
+    }).catch(function(e) { btn.disabled = false; msg.textContent = 'Error: '+e; msg.className = 'save-msg err'; });
+}
+
+function wmSetExternal() {
+  var btn = document.getElementById('wm-btn-ext');
+  var msg = document.getElementById('wm-ext-msg');
+  var address = document.getElementById('wm-ext-address').value.trim();
+
+  if (!address) { msg.textContent = 'Enter an address.'; msg.className = 'save-msg err'; return; }
+
+  btn.disabled = true; msg.textContent = 'Saving...'; msg.className = 'save-msg';
+
+  fetch('/api/wallet/address', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({address: address})})
+    .then(function(r){return r.json()}).then(function(d) {
+      btn.disabled = false;
+      if (d.success) {
+        msg.textContent = 'Address saved. Restart miner to use it.';
+        msg.className = 'save-msg ok';
+        walletAddress = address;
+        document.getElementById('dash-address').textContent = address;
+        document.getElementById('wm-ext-address').value = '';
+        wmLoadStatus();
+        loadConfig(); // sync stratum worker with new address
+      } else {
+        msg.textContent = 'Error: ' + (d.error || 'Invalid address');
+        msg.className = 'save-msg err';
+      }
+    }).catch(function(e) { btn.disabled = false; msg.textContent = 'Error: '+e; msg.className = 'save-msg err'; });
+}
+
+function wmCopy(elemId, btn) {
+  var text = document.getElementById(elemId).textContent;
+  var orig = btn.textContent;
+  navigator.clipboard.writeText(text).then(function() {
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = orig; }, 2000);
+  }).catch(function() {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = orig; }, 2000);
+  });
+}
+
 /* ========== Dashboard ========== */
 function showDashboard() {
   document.getElementById('setup-screen').classList.add('hidden');
@@ -495,7 +961,9 @@ function showDashboard() {
   loadConfig();
   loadHardware();
   loadOptimizationWarnings();
+  wmLoadStatus();
   initChart();
+  dashWalletLoad();
 }
 
 /* ========== Tabs ========== */
@@ -503,7 +971,18 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   event.target.classList.add('active');
   document.getElementById('tab-mining').classList.toggle('hidden', name!=='mining');
+  document.getElementById('tab-wallet').classList.add('hidden'); // legacy tab hidden
   document.getElementById('tab-settings').classList.toggle('hidden', name!=='settings');
+  if (name === 'settings') wmLoadStatus();
+}
+
+function switchSettingsPanel(name, btn) {
+  document.querySelectorAll('.settings-nav-item').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('.settings-panel').forEach(function(p){ p.classList.remove('active'); });
+  var panel = document.getElementById('sp-' + name);
+  if (panel) panel.classList.add('active');
+  if (name === 'wallet') wmLoadStatus();
 }
 
 /* ========== Mining Controls ========== */
@@ -637,9 +1116,52 @@ function updateThrottleBanner(idleSecs, isActive) {
 //     95.4% (2σ equivalent): [0.00233*mean, 3.505*mean]
 //     99.7% (3σ equivalent): [0.0000601*mean, 5.298*mean]
 
-var NETWORK_HASHRATE = 7e20; // 700 EH/s
+var NETWORK_HASHRATE = 7e20; // 700 EH/s fallback, updated from difficulty
 var BLOCK_TIME = 600; // seconds per block
 var SECS_PER_YEAR = 31536000;
+
+function fmtDifficulty(d) {
+  if (!d || d <= 0) return '-';
+  if (d >= 1e15) return (d/1e15).toFixed(2) + ' P';
+  if (d >= 1e12) return (d/1e12).toFixed(2) + ' T';
+  if (d >= 1e9)  return (d/1e9).toFixed(2) + ' G';
+  if (d >= 1e6)  return (d/1e6).toFixed(2) + ' M';
+  if (d >= 1e3)  return (d/1e3).toFixed(2) + ' K';
+  return d.toFixed(2);
+}
+
+function updateDifficultyDisplay(netDiff, poolDiff, hashrate) {
+  setText('net-difficulty', fmtDifficulty(netDiff));
+  setText('pool-difficulty', fmtDifficulty(poolDiff));
+
+  if (netDiff > 0) {
+    // network_hashrate = difficulty * 2^32 / block_time
+    NETWORK_HASHRATE = netDiff * 4294967296 / BLOCK_TIME;
+    setText('net-hashrate', fmtHash(NETWORK_HASHRATE));
+  } else {
+    setText('net-hashrate', '-');
+  }
+
+  if (hashrate > 0 && NETWORK_HASHRATE > 0) {
+    var pct = hashrate / NETWORK_HASHRATE;
+    setText('net-share', pct.toExponential(2) + ' (' + (pct * 100).toExponential(2) + '%)');
+
+    var note = document.getElementById('viability-note');
+    var meanYears = (NETWORK_HASHRATE * BLOCK_TIME / hashrate) / SECS_PER_YEAR;
+    if (meanYears > 1e6) {
+      note.style.display = 'block';
+      note.style.borderLeft = '3px solid var(--accent)';
+      note.innerHTML = '<strong>Solo mining reality check:</strong> At ' + fmtHash(hashrate) +
+        ', the expected time to find a block is ' + fmtYears(meanYears) +
+        '. Solo mining is a lottery — there are no partial rewards or minimum payouts. ' +
+        'You either find a full block (~3.125 BTC) or earn nothing.';
+    } else {
+      note.style.display = 'none';
+    }
+  } else {
+    setText('net-share', '-');
+  }
+}
 
 function updateProbTable(hashrate) {
   var el = document.getElementById('prob-display');
@@ -688,7 +1210,7 @@ function updateProbTable(hashrate) {
   var median = meanSecs * 0.6931; // ln(2)
   html += '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);color:var(--dim);font-size:0.8em">';
   html += 'Median: ' + fmtYears(median/SECS_PER_YEAR) + ' &bull; ';
-  html += 'Your hashrate represents ' + (hashrate/NETWORK_HASHRATE * 100).toExponential(2) + '% of the total Bitcoin network';
+  html += 'Your hashrate represents ' + (hashrate/NETWORK_HASHRATE * 100).toExponential(2) + '% of the network';
   html += '</div>';
 
   el.innerHTML = html;
@@ -747,6 +1269,9 @@ function populateConfigForm(c) {
     document.getElementById('cfg-cpu-thresh').value = Math.round(c.activity_cpu_threshold);
     document.getElementById('cfg-web-bind').value = c.web_bind;
     document.getElementById('cfg-log-level').value = c.log_level;
+    document.getElementById('cfg-elec-cost').value = c.electricity_cost_kwh;
+    elecCostKwh = c.electricity_cost_kwh || 0.12;
+    loadPools();
 }
 
 function gatherConfig() {
@@ -769,7 +1294,8 @@ function gatherConfig() {
     activity_ramp_up_secs: parseInt(document.getElementById('cfg-ramp-up').value)||30,
     activity_ramp_down_secs: parseInt(document.getElementById('cfg-ramp-down').value)||5,
     activity_cpu_threshold: parseFloat(document.getElementById('cfg-cpu-thresh').value)||50,
-    log_level: document.getElementById('cfg-log-level').value
+    log_level: document.getElementById('cfg-log-level').value,
+    electricity_cost_kwh: parseFloat(document.getElementById('cfg-elec-cost').value)||0.12
   };
 }
 
@@ -787,6 +1313,252 @@ function saveConfig() {
 }
 
 /* ========== Tests ========== */
+/* ========== Pool Selection ========== */
+var poolPresets = [];
+var BTC_PRICE_USD = 85000; // rough BTC/USD for earnings display
+
+function loadPools() {
+  fetch('/api/pools').then(function(r){return r.json()}).then(function(pools) {
+    poolPresets = pools;
+    renderPoolList();
+  }).catch(function(){ document.getElementById('pool-list').textContent = 'Failed to load pools.'; });
+}
+
+function renderPoolList() {
+  var container = document.getElementById('pool-list');
+  var currentUrl = document.getElementById('cfg-stratum-url').value;
+  var html = '';
+  for (var i = 0; i < poolPresets.length; i++) {
+    var p = poolPresets[i];
+    var isSelected = currentUrl.indexOf(p.url.replace('stratum+tcp://','')) >= 0;
+    var border = isSelected ? 'border:1px solid var(--accent)' : 'border:1px solid var(--border)';
+    var badge = p.pool_type === 'solo'
+      ? '<span style="background:var(--accent);color:#000;padding:1px 6px;border-radius:3px;font-size:0.75em">SOLO</span>'
+      : '<span style="background:var(--blue);color:#000;padding:1px 6px;border-radius:3px;font-size:0.75em">POOLED</span>';
+    var ln = p.lightning ? ' <span style="color:var(--accent);font-size:0.8em" title="Lightning Network payouts available">&#9889; Lightning</span>' : '';
+    html += '<div onclick="selectPool('+i+')" style="'+border+';padding:10px 12px;border-radius:6px;cursor:pointer;background:var(--surface)">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+    html += '<strong>'+p.name+'</strong> '+badge+ln;
+    html += '<span style="color:var(--dim);font-size:0.85em">Fee: '+p.fee_pct+'%</span>';
+    html += '</div>';
+    html += '<div style="color:var(--dim);font-size:0.8em;margin-top:4px">'+p.payout_method;
+    if (p.min_payout_btc > 0) html += ' &bull; Min payout: '+p.min_payout_btc+' BTC';
+    else html += ' &bull; No minimum payout';
+    html += '</div>';
+    html += '<div style="color:var(--dim);font-size:0.78em;margin-top:4px">'+p.description+'</div>';
+    if (isSelected) html += '<div style="color:var(--accent);font-size:0.8em;margin-top:4px">&#10003; Currently selected</div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function selectPool(idx) {
+  var p = poolPresets[idx];
+  document.getElementById('cfg-stratum-url').value = p.url;
+  document.getElementById('cfg-stratum-pass').value = p.password;
+
+  // Preserve the user's BTC address, update the worker suffix
+  var workerEl = document.getElementById('cfg-stratum-worker');
+  var current = workerEl.value;
+  // Extract the BTC address (everything before the first dot, or the whole string)
+  var addr = current.split('.')[0];
+  if (addr && (addr.startsWith('bc1') || addr.startsWith('1') || addr.startsWith('3') || addr.startsWith('tb1'))) {
+    workerEl.value = addr + p.worker_suffix;
+  } else {
+    // No valid address yet — just set the suffix pattern
+    workerEl.value = current || ('YOUR_ADDRESS' + p.worker_suffix);
+  }
+
+  renderPoolList();
+}
+
+function getCurrentPoolInfo() {
+  var url = document.getElementById('cfg-stratum-url')
+    ? document.getElementById('cfg-stratum-url').value
+    : '';
+  for (var i = 0; i < poolPresets.length; i++) {
+    if (url.indexOf(poolPresets[i].url.replace('stratum+tcp://','')) >= 0) return poolPresets[i];
+  }
+  return null;
+}
+
+function updateEarnings(hashrate) {
+  if (!hashrate || hashrate <= 0 || NETWORK_HASHRATE <= 0) {
+    setText('earn-day', '-');
+    setText('profit-day', '-');
+    return;
+  }
+  // daily_btc = (hashrate / network_hashrate) * blocks_per_day * block_reward
+  var blocksPerDay = 86400 / BLOCK_TIME;
+  var blockReward = 3.125;
+  var pool = getCurrentPoolInfo();
+  var feeMult = pool ? (1 - pool.fee_pct / 100) : 1;
+  var dailyBtc = (hashrate / NETWORK_HASHRATE) * blocksPerDay * blockReward * feeMult;
+  var dailyUsd = dailyBtc * BTC_PRICE_USD;
+
+  var btcStr = dailyBtc < 0.00000001 ? dailyBtc.toExponential(2) + ' BTC' : dailyBtc.toFixed(8) + ' BTC';
+  var poolLabel = pool ? ' (' + pool.name + ')' : '';
+  setText('earn-day', btcStr + poolLabel);
+
+  // Profit = earnings - electricity cost
+  var costPerDay = 0;
+  var powerEl = document.getElementById('cost-day');
+  if (powerEl && powerEl.textContent && powerEl.textContent !== '-') {
+    costPerDay = parseFloat(powerEl.textContent.replace('$','')) || 0;
+  }
+  var profitUsd = dailyUsd - costPerDay;
+  var profitStr = (profitUsd >= 0 ? '+' : '') + '$' + profitUsd.toFixed(4) + '/day';
+  if (dailyUsd > 0.0001) profitStr += ' ($' + dailyUsd.toFixed(4) + ' earned - $' + costPerDay.toFixed(2) + ' electricity)';
+  var profitEl = document.getElementById('profit-day');
+  if (profitEl) {
+    profitEl.textContent = profitStr;
+    profitEl.style.color = profitUsd >= 0 ? 'var(--active)' : 'var(--red)';
+  }
+}
+
+/* ========== Mining Advisor ========== */
+var lastAdvisorHr = 0;
+function updateAdvisor(hashrate, powerMw) {
+  // Only recalculate when hashrate changes significantly or first time
+  if (hashrate > 0 && Math.abs(hashrate - lastAdvisorHr) / Math.max(hashrate, 1) < 0.05 && lastAdvisorHr > 0) return;
+  lastAdvisorHr = hashrate;
+
+  var el = document.getElementById('advisor-display');
+  if (!el) return;
+  if (hashrate <= 0 || NETWORK_HASHRATE <= 0 || poolPresets.length === 0) {
+    el.innerHTML = '<div style="color:var(--dim)">Waiting for hashrate and pool data...</div>';
+    return;
+  }
+
+  var blocksPerDay = 86400 / BLOCK_TIME;
+  var blockReward = 3.125;
+  var dailyBtcGross = (hashrate / NETWORK_HASHRATE) * blocksPerDay * blockReward;
+  var powerKw = (powerMw || 0) / 1000000;
+  var dailyElecCost = powerKw * 24 * elecCostKwh;
+
+  // Score each pool
+  var ranked = [];
+  for (var i = 0; i < poolPresets.length; i++) {
+    var p = poolPresets[i];
+    var fee = p.fee_pct / 100;
+    var dailyBtc = dailyBtcGross * (1 - fee);
+    var dailyUsd = dailyBtc * BTC_PRICE_USD;
+    var dailyProfit = dailyUsd - dailyElecCost;
+    var daysToMinPayout = p.min_payout_btc > 0 ? (p.min_payout_btc / dailyBtc) : 0;
+    ranked.push({
+      pool: p,
+      dailyBtc: dailyBtc,
+      dailyUsd: dailyUsd,
+      dailyProfit: dailyProfit,
+      daysToMinPayout: daysToMinPayout,
+      score: dailyUsd * 1000 - (daysToMinPayout > 365*100 ? 1000 : 0) + (p.lightning ? 50 : 0) + (p.pool_type === 'pooled' ? 100 : 0)
+    });
+  }
+  ranked.sort(function(a, b) { return b.score - a.score; });
+
+  var html = '';
+
+  // Profitability summary
+  var bestPooled = null;
+  for (var j = 0; j < ranked.length; j++) {
+    if (ranked[j].pool.pool_type === 'pooled') { bestPooled = ranked[j]; break; }
+  }
+
+  html += '<div style="padding:10px;border-radius:6px;margin-bottom:12px;';
+  if (bestPooled && bestPooled.dailyProfit >= 0) {
+    html += 'background:rgba(0,200,100,0.1);border-left:3px solid var(--active)">';
+    html += '<strong>Mining is profitable</strong> at your electricity rate.';
+  } else {
+    html += 'background:rgba(255,100,50,0.1);border-left:3px solid var(--red)">';
+    html += '<strong>Mining costs more in electricity than it earns.</strong> ';
+    html += 'At ' + fmtHash(hashrate) + ', daily earnings are ~$' + (bestPooled ? bestPooled.dailyUsd.toFixed(6) : '0') + ' but electricity costs ~$' + dailyElecCost.toFixed(2) + '/day. ';
+    html += 'This is normal for home miners — most solo mine for the lottery chance of a full block, or as a hobby/learning experience.';
+  }
+  html += '</div>';
+
+  // Configuration tips
+  var tips = [];
+  var hwGpuEl = document.getElementById('sys-gpu-status');
+  var hwGpuText = hwGpuEl ? hwGpuEl.textContent : '';
+  if (hwGpuText.indexOf('Enabled') < 0 && hwGpuText.indexOf('Unavailable') < 0) {
+    tips.push('Enable GPU mining in Settings for higher hashrate.');
+  }
+
+  if (tips.length > 0) {
+    html += '<div style="padding:8px 10px;border-radius:4px;margin-bottom:12px;background:var(--surface);font-size:0.85em">';
+    html += '<strong>Configuration tips:</strong><ul style="margin:4px 0 0 16px;padding:0">';
+    for (var t = 0; t < tips.length; t++) html += '<li>' + tips[t] + '</li>';
+    html += '</ul></div>';
+  }
+
+  // Pool comparison table
+  html += '<table style="width:100%;border-collapse:collapse;font-size:0.85em">';
+  html += '<tr style="border-bottom:1px solid var(--border);color:var(--dim)">';
+  html += '<th style="text-align:left;padding:6px 4px">Pool</th>';
+  html += '<th style="text-align:left;padding:6px 4px">Type</th>';
+  html += '<th style="text-align:right;padding:6px 4px">Fee</th>';
+  html += '<th style="text-align:right;padding:6px 4px">Daily BTC</th>';
+  html += '<th style="text-align:right;padding:6px 4px">Time to Payout</th>';
+  html += '<th style="text-align:left;padding:6px 4px"></th>';
+  html += '</tr>';
+
+  for (var k = 0; k < ranked.length; k++) {
+    var r = ranked[k];
+    var isBest = (k === 0);
+    var rowStyle = isBest ? 'background:rgba(0,200,100,0.05);' : '';
+    html += '<tr style="border-bottom:1px solid var(--border);' + rowStyle + '">';
+    html += '<td style="padding:6px 4px;font-weight:' + (isBest ? 'bold' : 'normal') + '">' + r.pool.name;
+    if (r.pool.lightning) html += ' <span title="Lightning payouts available" style="font-size:0.8em">&#9889;</span>';
+    html += '</td>';
+
+    var typeColor = r.pool.pool_type === 'solo' ? 'var(--accent)' : 'var(--blue)';
+    html += '<td style="padding:6px 4px;color:' + typeColor + '">' + r.pool.payout_method + '</td>';
+    html += '<td style="text-align:right;padding:6px 4px">' + r.pool.fee_pct + '%</td>';
+
+    var btcStr = r.dailyBtc < 1e-8 ? r.dailyBtc.toExponential(1) : r.dailyBtc.toFixed(8);
+    html += '<td style="text-align:right;padding:6px 4px;font-family:monospace;font-size:0.8em">' + btcStr + '</td>';
+
+    var payoutStr;
+    if (r.pool.pool_type === 'solo') {
+      payoutStr = '<span title="Full block or nothing" style="color:var(--dim)">Lottery</span>';
+    } else if (r.pool.min_payout_btc <= 0 || r.pool.lightning) {
+      payoutStr = '<span style="color:var(--active)">Instant (LN)</span>';
+    } else if (r.daysToMinPayout > 365 * 1000) {
+      payoutStr = '<span style="color:var(--red)">' + fmtYears(r.daysToMinPayout / 365) + '</span>';
+    } else if (r.daysToMinPayout > 365) {
+      payoutStr = '<span style="color:var(--accent)">' + (r.daysToMinPayout / 365).toFixed(1) + ' years</span>';
+    } else {
+      payoutStr = Math.round(r.daysToMinPayout) + ' days';
+    }
+    html += '<td style="text-align:right;padding:6px 4px">' + payoutStr + '</td>';
+
+    var tag = isBest ? '<span style="color:var(--active);font-weight:bold">&#10003; Best</span>' : '';
+    html += '<td style="padding:6px 4px">' + tag + '</td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+
+  // Bottom recommendation
+  var best = ranked[0];
+  html += '<div style="margin-top:12px;padding:10px;border-radius:4px;border:1px solid var(--border);font-size:0.85em">';
+  html += '<strong>Recommendation:</strong> ';
+  if (best.pool.pool_type === 'pooled') {
+    html += 'Use <strong>' + best.pool.name + '</strong> (' + best.pool.payout_method + ', ' + best.pool.fee_pct + '% fee)';
+    if (best.pool.lightning) html += ' with Lightning payouts to avoid minimum payout thresholds';
+    html += '. ';
+    if (best.dailyProfit < 0) {
+      html += 'While mining is not profitable at your electricity rate, pooled mining at least provides steady micro-payments rather than the near-zero odds of solo mining.';
+    } else {
+      html += 'Expected daily earnings: ' + best.dailyBtc.toExponential(2) + ' BTC ($' + best.dailyUsd.toFixed(4) + ').';
+    }
+  } else {
+    html += 'All options show negligible earnings. <strong>' + best.pool.name + '</strong> is selected — solo mining is a lottery for the chance at a full ~3.125 BTC block reward.';
+  }
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
 function testConnection() {
   var btn = document.getElementById('btn-test-conn');
   var el = document.getElementById('conn-result');
@@ -818,6 +1590,320 @@ function testBenchmark() {
 /* ========== Range sliders ========== */
 document.getElementById('cfg-gpu-intensity').addEventListener('input', function(){ document.getElementById('cfg-gpu-intensity-val').textContent = this.value+'%'; });
 document.getElementById('cfg-min-gpu').addEventListener('input', function(){ document.getElementById('cfg-min-gpu-val').textContent = this.value+'%'; });
+
+/* ========== QR Code (server-rendered via Rust) ========== */
+function drawQR(canvas, text) {
+  // Render QR via a backend endpoint that returns a PNG
+  // Fallback: render address text if endpoint unavailable
+  fetch('/api/wallet/qr?data=' + encodeURIComponent(text))
+    .then(function(r) {
+      if (!r.ok) throw new Error('QR endpoint unavailable');
+      return r.blob();
+    })
+    .then(function(blob) {
+      var img = new Image();
+      img.onload = function() {
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(blob);
+    })
+    .catch(function() {
+      // Fallback: just show text
+      var ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#000000';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('QR unavailable', canvas.width/2, canvas.height/2);
+    });
+}
+
+/* ========== Wallet Tab ========== */
+var wtLoaded = false;
+var wtBtcPrice = 0;
+
+function wtLoad() {
+  var addr = walletAddress;
+  if (!addr) {
+    // Try extracting from config stratum worker
+    fetch('/api/config').then(function(r){return r.json()}).then(function(d) {
+      if (d.success && d.config && d.config.stratum_worker) {
+        var w = d.config.stratum_worker;
+        var dot = w.lastIndexOf('.');
+        if (dot > 0) addr = w.substring(0, dot);
+        else addr = w;
+        if (addr && !addr.startsWith('YOUR_')) { wtRender(addr); }
+        else { wtShowEmpty(); }
+      } else { wtShowEmpty(); }
+    });
+  } else {
+    wtRender(addr);
+  }
+}
+
+function wtShowEmpty() {
+  document.getElementById('wt-no-wallet').classList.remove('hidden');
+  document.getElementById('wt-content').classList.add('hidden');
+}
+
+function wtRender(addr) {
+  document.getElementById('wt-no-wallet').classList.add('hidden');
+  document.getElementById('wt-content').classList.remove('hidden');
+  document.getElementById('wt-address').textContent = addr;
+  document.getElementById('wt-explorer-link').href = 'https://mempool.space/address/' + addr;
+
+  // Render QR code with BIP21 URI
+  var qrCanvas = document.getElementById('wt-qr');
+  drawQR(qrCanvas, 'bitcoin:' + addr);
+
+  // Determine wallet type
+  fetch('/api/wallet').then(function(r){return r.json()}).then(function(d) {
+    var typeEl = document.getElementById('wt-type');
+    if (d.exists && d.has_mnemonic) typeEl.textContent = 'Generated wallet (BIP39/BIP84)';
+    else if (d.exists) typeEl.textContent = 'External address';
+    else typeEl.textContent = 'From config';
+  });
+
+  wtFetchBalance(addr);
+  wtFetchPrice();
+}
+
+function wtRefresh() {
+  var btn = document.getElementById('wt-refresh-btn');
+  btn.disabled = true; btn.textContent = 'Refreshing...';
+  var addr = document.getElementById('wt-address').textContent;
+  wtFetchBalance(addr);
+  wtFetchPrice();
+  setTimeout(function(){ btn.disabled = false; btn.textContent = 'Refresh'; }, 2000);
+}
+
+function wtFetchBalance(addr) {
+  document.getElementById('wt-error').textContent = '';
+
+  fetch('https://mempool.space/api/address/' + addr)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(d) {
+      var confirmed = (d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum);
+      var unconfirmed = (d.mempool_stats.funded_txo_sum - d.mempool_stats.spent_txo_sum);
+      var txCount = d.chain_stats.tx_count + d.mempool_stats.tx_count;
+
+      document.getElementById('wt-balance-btc').textContent = wtFmtBtc(confirmed);
+      document.getElementById('wt-unconfirmed').textContent = wtFmtBtc(unconfirmed);
+      document.getElementById('wt-tx-count').textContent = String(txCount);
+
+      wtUpdateUsd(confirmed, unconfirmed);
+      wtFetchTxs(addr);
+    })
+    .catch(function(e) {
+      document.getElementById('wt-error').textContent = 'Failed to fetch balance: ' + e.message;
+      document.getElementById('wt-balance-btc').textContent = '--';
+      document.getElementById('wt-unconfirmed').textContent = '--';
+    });
+}
+
+function wtFetchPrice() {
+  fetch('https://mempool.space/api/v1/prices')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.USD) {
+        wtBtcPrice = d.USD;
+        // Re-update USD values if we already have balances
+        var balText = document.getElementById('wt-balance-btc').textContent;
+        if (balText !== '--') {
+          var sats = wtParseBtc(balText);
+          var unconfText = document.getElementById('wt-unconfirmed').textContent;
+          var unconfSats = wtParseBtc(unconfText);
+          wtUpdateUsd(sats, unconfSats);
+        }
+      }
+    })
+    .catch(function() {}); // Price is nice-to-have, don't error
+}
+
+function wtUpdateUsd(confirmedSats, unconfirmedSats) {
+  if (wtBtcPrice <= 0) {
+    document.getElementById('wt-balance-usd').textContent = '';
+    document.getElementById('wt-unconfirmed-usd').textContent = '';
+    return;
+  }
+  var confUsd = (confirmedSats / 1e8) * wtBtcPrice;
+  var unconfUsd = (unconfirmedSats / 1e8) * wtBtcPrice;
+  document.getElementById('wt-balance-usd').textContent = '$' + wtFmtUsd(confUsd);
+  if (unconfirmedSats !== 0) {
+    document.getElementById('wt-unconfirmed-usd').textContent = '$' + wtFmtUsd(unconfUsd);
+  } else {
+    document.getElementById('wt-unconfirmed-usd').textContent = '';
+  }
+}
+
+function wtFetchTxs(addr) {
+  fetch('https://mempool.space/api/address/' + addr + '/txs')
+    .then(function(r){ return r.json(); })
+    .then(function(txs) {
+      var el = document.getElementById('wt-tx-list');
+      if (!txs || txs.length === 0) {
+        el.innerHTML = '<div style="padding:12px 0;color:var(--dim)">No transactions yet. When you find a block, the reward will appear here.</div>';
+        return;
+      }
+
+      var html = '';
+      var shown = Math.min(txs.length, 10);
+      for (var i = 0; i < shown; i++) {
+        var tx = txs[i];
+        var net = wtTxNet(tx, addr);
+        var isIncoming = net >= 0;
+        var color = isIncoming ? 'var(--green)' : 'var(--red)';
+        var sign = isIncoming ? '+' : '';
+        var confirmed = tx.status && tx.status.confirmed;
+        var date = confirmed && tx.status.block_time
+          ? new Date(tx.status.block_time * 1000).toLocaleDateString()
+          : 'Unconfirmed';
+        var txid = tx.txid.substring(0, 12) + '...';
+
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">';
+        html += '<div>';
+        html += '<a href="https://mempool.space/tx/' + tx.txid + '" target="_blank" style="color:var(--blue);text-decoration:none;font-size:0.9em">' + txid + '</a>';
+        html += '<div style="font-size:0.8em;color:var(--dim)">' + date + '</div>';
+        html += '</div>';
+        html += '<div style="text-align:right">';
+        html += '<div style="color:' + color + '">' + sign + wtFmtBtc(net) + '</div>';
+        if (wtBtcPrice > 0) {
+          html += '<div style="font-size:0.8em;color:var(--dim)">$' + wtFmtUsd(Math.abs(net) / 1e8 * wtBtcPrice) + '</div>';
+        }
+        html += '</div></div>';
+      }
+      if (txs.length > shown) {
+        html += '<div style="padding:8px 0;text-align:center"><a href="https://mempool.space/address/' + addr + '" target="_blank" style="color:var(--blue);text-decoration:none;font-size:0.85em">View all ' + txs.length + ' transactions</a></div>';
+      }
+      el.innerHTML = html;
+    })
+    .catch(function() {
+      document.getElementById('wt-tx-list').innerHTML = '<div style="color:var(--dim)">Could not load transactions.</div>';
+    });
+}
+
+function wtTxNet(tx, addr) {
+  var received = 0, sent = 0;
+  if (tx.vout) {
+    for (var i = 0; i < tx.vout.length; i++) {
+      if (tx.vout[i].scriptpubkey_address === addr) received += tx.vout[i].value;
+    }
+  }
+  if (tx.vin) {
+    for (var i = 0; i < tx.vin.length; i++) {
+      if (tx.vin[i].prevout && tx.vin[i].prevout.scriptpubkey_address === addr) sent += tx.vin[i].prevout.value;
+    }
+  }
+  return received - sent;
+}
+
+function wtFmtBtc(sats) {
+  if (sats === 0) return '0 BTC';
+  var btc = Math.abs(sats) / 1e8;
+  var s = sats < 0 ? '-' : '';
+  if (btc >= 1) return s + btc.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC';
+  if (btc >= 0.001) return s + btc.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC';
+  return s + Math.abs(sats).toLocaleString() + ' sats';
+}
+
+function wtParseBtc(text) {
+  if (!text || text === '--') return 0;
+  if (text.indexOf('sats') >= 0) return parseInt(text.replace(/[^0-9-]/g, '')) || 0;
+  return Math.round(parseFloat(text) * 1e8) || 0;
+}
+
+function wtFmtUsd(n) {
+  if (n >= 1) return n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (n >= 0.01) return n.toFixed(2);
+  return n.toFixed(4);
+}
+
+/* ========== Dashboard Wallet Card ========== */
+function dashWalletLoad() {
+  var addr = walletAddress;
+  if (!addr) return;
+  var card = document.getElementById('dash-wallet-card');
+  card.classList.remove('hidden');
+  document.getElementById('dash-wallet-addr').textContent = addr;
+  document.getElementById('dash-explorer-link').href = 'https://mempool.space/address/' + addr;
+
+  // QR code
+  var qr = document.getElementById('dash-qr');
+  drawQR(qr, 'bitcoin:' + addr);
+
+  // Fetch balance
+  fetch('https://mempool.space/api/address/' + addr)
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(d) {
+      var confirmed = d.chain_stats.funded_txo_sum - d.chain_stats.spent_txo_sum;
+      var unconfirmed = d.mempool_stats.funded_txo_sum - d.mempool_stats.spent_txo_sum;
+      var txCount = d.chain_stats.tx_count + d.mempool_stats.tx_count;
+      document.getElementById('dash-balance').textContent = wtFmtBtc(confirmed);
+      document.getElementById('dash-unconfirmed').textContent = wtFmtBtc(unconfirmed);
+      document.getElementById('dash-tx-count').textContent = String(txCount);
+
+      // USD conversion
+      fetch('https://mempool.space/api/v1/prices')
+        .then(function(r){ return r.json(); })
+        .then(function(p) {
+          if (p.USD) {
+            var usd = (confirmed / 1e8) * p.USD;
+            document.getElementById('dash-balance-usd').textContent = '$' + wtFmtUsd(usd);
+            BTC_PRICE_USD = p.USD; // update global for advisor
+          }
+        }).catch(function(){});
+    })
+    .catch(function() {
+      document.getElementById('dash-balance').textContent = '--';
+      document.getElementById('dash-unconfirmed').textContent = '--';
+    });
+}
+
+function dashWalletRefresh() {
+  var btn = document.getElementById('dash-wallet-refresh');
+  btn.disabled = true; btn.textContent = 'Refreshing...';
+  dashWalletLoad();
+  setTimeout(function(){ btn.disabled = false; btn.textContent = 'Refresh'; }, 2000);
+}
+
+function fmtPower(mw) {
+  if (!mw || mw <= 0) return '-';
+  var w = mw / 1000;
+  if (w >= 100) return w.toFixed(0) + ' W';
+  if (w >= 10) return w.toFixed(1) + ' W';
+  return w.toFixed(2) + ' W';
+}
+
+var elecCostKwh = 0.12; // updated from config
+function fmtCost(dollars) {
+  if (dollars < 0.01) return '<$0.01';
+  if (dollars < 1) return '$' + dollars.toFixed(2);
+  return '$' + dollars.toFixed(2);
+}
+function updateCostDisplay(totalMw) {
+  if (!totalMw || totalMw <= 0 || elecCostKwh <= 0) {
+    setText('cost-hour', '-');
+    setText('cost-day', '-');
+    setText('cost-month', '-');
+    return;
+  }
+  var kw = totalMw / 1000000; // milliwatts to kilowatts
+  var costPerHour = kw * elecCostKwh;
+  setText('cost-hour', fmtCost(costPerHour));
+  setText('cost-day', fmtCost(costPerHour * 24));
+  setText('cost-month', fmtCost(costPerHour * 24 * 30));
+}
 
 /* ========== SSE + Stats ========== */
 function fmtHash(h) {
@@ -958,6 +2044,10 @@ function startSSE() {
   var es = new EventSource('/events');
   es.onopen = function(){ el('conn-dot').className='status on'; el('connection').textContent='Connected'; };
   es.onerror = function(){ el('conn-dot').className='status off'; el('connection').textContent='Disconnected — retrying...'; };
+  es.addEventListener('block_found', function(e) {
+    showBlockCelebration(e.data);
+  });
+
   es.onmessage = function(e) {
     var d = JSON.parse(e.data);
 
@@ -982,6 +2072,15 @@ function startSSE() {
       setText('idle-time', fmtTime(d.idle_secs));
       setText('uptime', fmtTime(d.uptime_secs));
       setText('sys-threads', d.cpu_threads + ' active');
+      setText('power-total', fmtPower(d.power_total_mw));
+      setText('power-cpu', fmtPower(d.power_cpu_mw));
+      setText('power-gpu', fmtPower(d.power_gpu_mw));
+      setText('power-ane', fmtPower(d.power_ane_mw));
+      setText('power-dram', fmtPower(d.power_dram_mw));
+      updateCostDisplay(d.power_total_mw);
+      updateDifficultyDisplay(d.network_difficulty, d.pool_difficulty, hr);
+      updateEarnings(hr);
+      updateAdvisor(hr, d.power_total_mw);
 
       // GPU bar — only update style if changed
       var gpuW = d.gpu_intensity_pct+'%';
@@ -1018,6 +2117,48 @@ function startSSE() {
       }
     });
   };
+}
+/* ========== Block Found Celebration ========== */
+function showBlockCelebration(blockNum) {
+  var el = document.getElementById('block-celebration');
+  var txt = document.getElementById('block-celebration-text');
+  txt.textContent = 'BLOCK #' + blockNum + ' FOUND! Check your wallet for ~3.125 BTC!';
+  el.classList.add('show');
+
+  // Play ascending celebration tones
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [523.25, 659.25, 783.99, 1046.5].forEach(function(freq, i) {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.value = 0.15;
+      osc.start(ctx.currentTime + i * 0.2);
+      osc.stop(ctx.currentTime + i * 0.2 + 0.3);
+    });
+  } catch(e) {}
+
+  // Browser notification
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('mi-miner: BLOCK FOUND!', {
+      body: 'Block #' + blockNum + ' found! ~3.125 BTC reward.'
+    });
+  } else if ('Notification' in window && Notification.permission !== 'denied') {
+    Notification.requestPermission().then(function(perm) {
+      if (perm === 'granted') {
+        new Notification('mi-miner: BLOCK FOUND!', {
+          body: 'Block #' + blockNum + ' found! ~3.125 BTC reward.'
+        });
+      }
+    });
+  }
+}
+
+function dismissBlockCelebration() {
+  document.getElementById('block-celebration').classList.remove('show');
 }
 </script>
 </body>

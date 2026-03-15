@@ -170,24 +170,16 @@ pub fn nbits_to_target(nbits: u32) -> [u8; 32] {
     target
 }
 
-/// Check if a hash meets the target (hash <= target).
-/// Both are 32-byte big-endian (as stored internally).
-/// But Bitcoin hashes are compared as little-endian 256-bit numbers,
-/// so we reverse for comparison.
-pub fn meets_target(hash: &[u8; 32], target: &[u8; 32]) -> bool {
-    // Compare as big-endian (byte 0 is most significant)
-    // The hash from SHA-256d needs to be reversed since Bitcoin treats it as LE
-    for i in (0..32).rev() {
-        let h = hash[i];
-        let t = target[31 - i];
-        if h < t {
-            return true;
-        }
-        if h > t {
-            return false;
-        }
+/// Convert compact target (nBits) to mining difficulty.
+/// difficulty = diff1_target / target = (0xffff * 2^(8*26)) / (mantissa * 2^(8*(exp-3)))
+pub fn nbits_to_difficulty(nbits: u32) -> f64 {
+    let exp = (nbits >> 24) as i32;
+    let mantissa = (nbits & 0x007f_ffff) as f64;
+    if mantissa == 0.0 || exp == 0 {
+        return 0.0;
     }
-    true // equal
+    let shift = 8 * (0x1d - exp);
+    (0xffff as f64 / mantissa) * (2.0f64).powi(shift)
 }
 
 // SHA-256 initial hash values
@@ -479,17 +471,4 @@ mod tests {
         assert_eq!(&tx[6..8], &[0x03, 0x04]);
     }
 
-    #[test]
-    fn test_meets_target_easy() {
-        let hash = [0u8; 32]; // All zeros — meets any target
-        let target = [0xFF; 32];
-        assert!(meets_target(&hash, &target));
-    }
-
-    #[test]
-    fn test_meets_target_impossible() {
-        let hash = [0xFF; 32]; // All ones
-        let target = [0u8; 32]; // Target is zero
-        assert!(!meets_target(&hash, &target));
-    }
 }

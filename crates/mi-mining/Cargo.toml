@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 mi-core = { path = "../mi-core" }
-sha2 = "0.10"
+sha2 = { version = "0.10", features = ["asm", "compress"] }
 tracing = "0.1"
 num_cpus = "1"
+hex = "0.4"

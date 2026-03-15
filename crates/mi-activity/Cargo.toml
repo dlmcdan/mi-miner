@@ -9,7 +9,7 @@ tokio = { version = "1", features = ["time", "sync"] }
 tracing = "0.1"
 sysinfo = "0.32"
 
-# macOS: uses CGEventSourceSecondsSinceLastEventType via direct FFI (no crate needed)
+# macOS: uses CoreGraphics FFI (idle detection) and IOKit FFI (sleep inhibitor)
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.12"

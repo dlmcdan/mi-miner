@@ -29,6 +29,7 @@ impl ActivityMonitor {
         throttle_tx: watch::Sender<ThrottleState>,
     ) -> Result<(), mi_core::MiMinerError> {
         let mut sys = System::new();
+        let mut power_sampler = platform::power_sampler();
 
         #[cfg(target_os = "linux")]
         {
@@ -61,6 +62,17 @@ impl ActivityMonitor {
 
             let throttle =
                 compute_throttle(&config, idle_secs, cpu_usage, self.max_threads);
+
+            // Sample power consumption
+            if let Some(ref mut sampler) = power_sampler {
+                if let Some(power) = sampler.sample(1000) {
+                    self.stats.power_cpu_mw.store(power.cpu_mw, Ordering::Relaxed);
+                    self.stats.power_gpu_mw.store(power.gpu_mw, Ordering::Relaxed);
+                    self.stats.power_ane_mw.store(power.ane_mw, Ordering::Relaxed);
+                    self.stats.power_dram_mw.store(power.dram_mw, Ordering::Relaxed);
+                    self.stats.power_total_mw.store(power.total_mw, Ordering::Relaxed);
+                }
+            }
 
             tracing::trace!(
                 idle_secs = idle_secs as u64,

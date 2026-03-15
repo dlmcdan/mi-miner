@@ -35,6 +35,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 daemonize = "0.5"
 libc = "0.2"
+rpassword = "7"
 
 [profile.release]
 opt-level = 3

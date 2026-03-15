@@ -280,6 +280,9 @@ pub struct ConfigData {
     pub activity_cpu_threshold: f32,
     pub log_level: String,
     pub electricity_cost_kwh: f64,
+    pub reward_sharing_enabled: bool,
+    pub reward_sharing_pct: f64,
+    pub reward_sharing_address: String,
 }
 
 impl From<&MinerConfig> for ConfigData {
@@ -305,6 +308,9 @@ impl From<&MinerConfig> for ConfigData {
             activity_cpu_threshold: c.activity.cpu_threshold,
             log_level: c.logging.level.clone(),
             electricity_cost_kwh: c.mining.electricity_cost_kwh,
+            reward_sharing_enabled: c.reward_sharing.enabled,
+            reward_sharing_pct: c.reward_sharing.percentage,
+            reward_sharing_address: c.reward_sharing.developer_address.clone(),
         }
     }
 }
@@ -331,6 +337,9 @@ impl ConfigData {
         c.activity.cpu_threshold = self.activity_cpu_threshold;
         c.logging.level = self.log_level.clone();
         c.mining.electricity_cost_kwh = self.electricity_cost_kwh;
+        c.reward_sharing.enabled = self.reward_sharing_enabled;
+        c.reward_sharing.percentage = self.reward_sharing_pct;
+        c.reward_sharing.developer_address = self.reward_sharing_address.clone();
     }
 }
 
@@ -740,7 +749,7 @@ mod tests {
             activity_ramp_down_secs: 3,
             activity_cpu_threshold: 75.0,
             log_level: "debug".to_string(),
-            electricity_cost_kwh: 0.15,
+            electricity_cost_kwh: 0.15, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: "bc1qtest".to_string(),
         };
         data.apply_to(&mut config);
 
@@ -800,7 +809,10 @@ mod tests {
             "activity_ramp_down_secs": 5,
             "activity_cpu_threshold": 50.0,
             "log_level": "info",
-            "electricity_cost_kwh": 0.12
+            "electricity_cost_kwh": 0.12,
+            "reward_sharing_enabled": true,
+            "reward_sharing_pct": 1.0,
+            "reward_sharing_address": "bc1qtest"
         }"#;
         let data: ConfigData = serde_json::from_str(json).unwrap();
         assert_eq!(data.mining_threads, 8);
@@ -953,7 +965,7 @@ mod tests {
             activity_ramp_down_secs: 5,
             activity_cpu_threshold: 50.0,
             log_level: "info".to_string(),
-            electricity_cost_kwh: 0.12,
+            electricity_cost_kwh: 0.12, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: "bc1qtest".to_string(),
         };
         let hw = mi_core::hardware::detect();
         let resp = AutoConfigResponse {
@@ -1130,7 +1142,7 @@ mod tests {
             activity_ramp_down_secs: 0,
             activity_cpu_threshold: 0.0,
             log_level: "".to_string(),
-            electricity_cost_kwh: 0.0,
+            electricity_cost_kwh: 0.0, reward_sharing_enabled: false, reward_sharing_pct: 0.0, reward_sharing_address: "".to_string(),
         };
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"mining_threads\":0"));
@@ -1164,7 +1176,7 @@ mod tests {
             activity_ramp_down_secs: u64::MAX,
             activity_cpu_threshold: 100.0,
             log_level: "trace".to_string(),
-            electricity_cost_kwh: 0.50,
+            electricity_cost_kwh: 0.50, reward_sharing_enabled: true, reward_sharing_pct: 2.0, reward_sharing_address: "bc1qtest".to_string(),
         };
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"gpu_intensity\":1.0") || json.contains("\"gpu_intensity\":1"));
@@ -1199,7 +1211,7 @@ mod tests {
             activity_ramp_down_secs: 0,
             activity_cpu_threshold: 0.0,
             log_level: "".to_string(),
-            electricity_cost_kwh: 0.0,
+            electricity_cost_kwh: 0.0, reward_sharing_enabled: false, reward_sharing_pct: 0.0, reward_sharing_address: "".to_string(),
         };
 
         let mut config = MinerConfig::default();
@@ -1233,7 +1245,7 @@ mod tests {
             activity_ramp_down_secs: 3,
             activity_cpu_threshold: 60.0,
             log_level: "warn".to_string(),
-            electricity_cost_kwh: 0.18,
+            electricity_cost_kwh: 0.18, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: "bc1qtest".to_string(),
         };
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: ConfigData = serde_json::from_str(&json).unwrap();
@@ -1273,5 +1285,82 @@ mod tests {
         assert!(json.contains("disk full"));
         // config should be skipped (skip_serializing_if)
         assert!(!json.contains("\"config\""));
+    }
+
+    // ── Pool Presets ──
+
+    #[test]
+    fn test_pool_presets_not_empty() {
+        let pools = pool_presets();
+        assert!(pools.len() >= 5, "should have multiple pool presets");
+    }
+
+    #[test]
+    fn test_pool_presets_have_valid_urls() {
+        for p in pool_presets() {
+            assert!(
+                p.url.starts_with("stratum+tcp://"),
+                "pool {} URL should start with stratum+tcp://, got {}",
+                p.name,
+                p.url
+            );
+        }
+    }
+
+    #[test]
+    fn test_pool_presets_have_valid_types() {
+        for p in pool_presets() {
+            assert!(
+                p.pool_type == "solo" || p.pool_type == "pooled",
+                "pool {} type should be solo or pooled, got {}",
+                p.name,
+                p.pool_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_pool_presets_serialize() {
+        let pools = pool_presets();
+        let json = serde_json::to_string(&pools).unwrap();
+        assert!(json.contains("Solo CKPool"));
+        assert!(json.contains("Braiins"));
+        assert!(json.contains("worker_suffix"));
+        assert!(json.contains("password"));
+    }
+
+    #[test]
+    fn test_pool_presets_fees_in_range() {
+        for p in pool_presets() {
+            assert!(
+                p.fee_pct >= 0.0 && p.fee_pct <= 10.0,
+                "pool {} fee {} should be 0-10%",
+                p.name,
+                p.fee_pct
+            );
+        }
+    }
+
+    // ── Reward Sharing Config ──
+
+    #[test]
+    fn test_config_data_includes_reward_sharing() {
+        let config = MinerConfig::default();
+        let data = ConfigData::from(&config);
+        assert!(data.reward_sharing_enabled);
+        assert_eq!(data.reward_sharing_pct, 1.0);
+        assert!(data.reward_sharing_address.starts_with("bc1q"));
+    }
+
+    #[test]
+    fn test_config_data_apply_reward_sharing() {
+        let mut config = MinerConfig::default();
+        let mut data = ConfigData::from(&config);
+        data.reward_sharing_enabled = false;
+        data.reward_sharing_pct = 2.5;
+        data.apply_to(&mut config);
+
+        assert!(!config.reward_sharing.enabled);
+        assert_eq!(config.reward_sharing.percentage, 2.5);
     }
 }

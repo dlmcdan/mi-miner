@@ -512,6 +512,7 @@
     <button class="settings-nav-item" onclick="switchSettingsPanel('hardware',this)">Hardware</button>
     <button class="settings-nav-item" onclick="switchSettingsPanel('pool',this)">Pool</button>
     <button class="settings-nav-item" onclick="switchSettingsPanel('behavior',this)">Behavior</button>
+    <button class="settings-nav-item" onclick="switchSettingsPanel('rewards',this)">Rewards</button>
     <button class="settings-nav-item" onclick="switchSettingsPanel('dashboard-cfg',this)">Dashboard</button>
     <button class="settings-nav-item" onclick="switchSettingsPanel('logging',this)">Logging</button>
   </nav>
@@ -639,6 +640,38 @@
     </div>
 
     <!-- ===== Dashboard ===== -->
+    <!-- ===== Reward Sharing ===== -->
+    <div id="sp-rewards" class="settings-panel">
+      <div class="settings-section">
+        <h3>Developer Donation</h3>
+        <p style="color:var(--dim);font-size:0.82em;margin-bottom:14px;line-height:1.5">
+          Support mi-miner development by automatically sharing a percentage of any block rewards.
+          When you find a block, the configured percentage will be tracked as a donation to the developer.
+        </p>
+        <div class="field"><label title="Enable or disable reward sharing with the developer">Enabled</label><input type="checkbox" id="cfg-reward-enabled"></div>
+        <div class="field"><label title="Percentage of block rewards to share (0.1% to 10%)">Share %</label><input type="number" id="cfg-reward-pct" min="0.1" max="10" step="0.1" style="max-width:100px"><span style="color:var(--dim);font-size:0.82em;margin-left:8px">of block reward</span></div>
+        <div id="reward-preview" style="margin-top:12px;padding:10px;border-radius:6px;background:var(--bg);border:1px solid var(--border);font-size:0.82em;color:var(--dim)"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Developer Address</h3>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;word-break:break-all;font-size:0.82em;color:var(--blue)" id="cfg-reward-address">-</div>
+        <input type="hidden" id="cfg-reward-address-val">
+        <div style="margin-top:8px;font-size:0.75em;color:var(--dim)">
+          <a href="https://mempool.space/address/bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0" target="_blank" style="color:var(--blue);text-decoration:none">View on mempool.space</a>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Accumulated Donations</h3>
+        <div class="row"><span class="label">Blocks Found</span><span id="reward-blocks">0</span></div>
+        <div class="row"><span class="label">Total Rewards</span><span id="reward-total-btc">0 BTC</span></div>
+        <div class="row"><span class="label">Developer Share</span><span id="reward-dev-share" style="color:var(--accent)">0 BTC</span></div>
+        <div id="reward-pay-link" class="hidden" style="margin-top:12px">
+          <a id="reward-pay-btn" href="#" class="btn" style="padding:8px 16px;font-size:0.85em;text-decoration:none;display:inline-block">Send Donation</a>
+          <div style="color:var(--dim);font-size:0.75em;margin-top:6px">Opens in your wallet app with the amount pre-filled.</div>
+        </div>
+      </div>
+    </div>
+
     <div id="sp-dashboard-cfg" class="settings-panel">
       <div class="settings-section">
         <h3>Web Server</h3>
@@ -1271,6 +1304,11 @@ function populateConfigForm(c) {
     document.getElementById('cfg-log-level').value = c.log_level;
     document.getElementById('cfg-elec-cost').value = c.electricity_cost_kwh;
     elecCostKwh = c.electricity_cost_kwh || 0.12;
+    document.getElementById('cfg-reward-enabled').checked = c.reward_sharing_enabled;
+    document.getElementById('cfg-reward-pct').value = c.reward_sharing_pct;
+    document.getElementById('cfg-reward-address').textContent = c.reward_sharing_address;
+    document.getElementById('cfg-reward-address-val').value = c.reward_sharing_address;
+    updateRewardPreview();
     loadPools();
 }
 
@@ -1295,7 +1333,10 @@ function gatherConfig() {
     activity_ramp_down_secs: parseInt(document.getElementById('cfg-ramp-down').value)||5,
     activity_cpu_threshold: parseFloat(document.getElementById('cfg-cpu-thresh').value)||50,
     log_level: document.getElementById('cfg-log-level').value,
-    electricity_cost_kwh: parseFloat(document.getElementById('cfg-elec-cost').value)||0.12
+    electricity_cost_kwh: parseFloat(document.getElementById('cfg-elec-cost').value)||0.12,
+    reward_sharing_enabled: document.getElementById('cfg-reward-enabled').checked,
+    reward_sharing_pct: parseFloat(document.getElementById('cfg-reward-pct').value)||1.0,
+    reward_sharing_address: document.getElementById('cfg-reward-address-val').value || 'bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0'
   };
 }
 
@@ -1415,6 +1456,57 @@ function updateEarnings(hashrate) {
     profitEl.style.color = profitUsd >= 0 ? 'var(--active)' : 'var(--red)';
   }
 }
+
+/* ========== Reward Sharing ========== */
+function updateRewardPreview() {
+  var el = document.getElementById('reward-preview');
+  if (!el) return;
+  var enabled = document.getElementById('cfg-reward-enabled').checked;
+  var pct = parseFloat(document.getElementById('cfg-reward-pct').value) || 1.0;
+  if (!enabled) {
+    el.innerHTML = 'Reward sharing is <strong>disabled</strong>. The developer receives nothing from your mining rewards.';
+    return;
+  }
+  var share = 3.125 * pct / 100;
+  el.innerHTML = 'If you find a block (~3.125 BTC), <strong>' + share.toFixed(4) + ' BTC</strong> (' + pct + '%) will be tracked as a developer donation.';
+}
+
+function updateRewardTracking(blocksFound) {
+  var enabled = document.getElementById('cfg-reward-enabled');
+  if (!enabled) return;
+  var pct = parseFloat(document.getElementById('cfg-reward-pct').value) || 1.0;
+  var addr = document.getElementById('cfg-reward-address-val');
+  if (!addr) return;
+
+  var blockReward = 3.125;
+  var totalBtc = blocksFound * blockReward;
+  var devShare = totalBtc * pct / 100;
+
+  var blocksEl = document.getElementById('reward-blocks');
+  var totalEl = document.getElementById('reward-total-btc');
+  var devEl = document.getElementById('reward-dev-share');
+  var linkEl = document.getElementById('reward-pay-link');
+  var btnEl = document.getElementById('reward-pay-btn');
+
+  if (blocksEl) blocksEl.textContent = String(blocksFound);
+  if (totalEl) totalEl.textContent = totalBtc.toFixed(4) + ' BTC';
+  if (devEl) devEl.textContent = devShare.toFixed(4) + ' BTC';
+
+  if (devShare > 0 && enabled.checked && linkEl && btnEl) {
+    linkEl.classList.remove('hidden');
+    btnEl.href = 'bitcoin:' + addr.value + '?amount=' + devShare.toFixed(8) + '&label=mi-miner%20developer%20donation';
+  } else if (linkEl) {
+    linkEl.classList.add('hidden');
+  }
+}
+
+// Attach live preview update to the config inputs
+document.addEventListener('DOMContentLoaded', function() {
+  var enEl = document.getElementById('cfg-reward-enabled');
+  var pctEl = document.getElementById('cfg-reward-pct');
+  if (enEl) enEl.addEventListener('change', updateRewardPreview);
+  if (pctEl) pctEl.addEventListener('input', updateRewardPreview);
+});
 
 /* ========== Mining Advisor ========== */
 var lastAdvisorHr = 0;
@@ -2081,6 +2173,7 @@ function startSSE() {
       updateDifficultyDisplay(d.network_difficulty, d.pool_difficulty, hr);
       updateEarnings(hr);
       updateAdvisor(hr, d.power_total_mw);
+      updateRewardTracking(d.blocks_found);
 
       // GPU bar — only update style if changed
       var gpuW = d.gpu_intensity_pct+'%';

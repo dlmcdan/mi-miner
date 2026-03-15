@@ -471,4 +471,36 @@ mod tests {
         assert_eq!(&tx[6..8], &[0x03, 0x04]);
     }
 
+    #[test]
+    fn test_nbits_to_difficulty_diff1() {
+        // nbits 0x1d00ffff is difficulty 1 by definition
+        let diff = nbits_to_difficulty(0x1d00ffff);
+        assert!((diff - 1.0).abs() < 0.001, "diff1 should be ~1.0, got {diff}");
+    }
+
+    #[test]
+    fn test_nbits_to_difficulty_zero_exponent() {
+        assert_eq!(nbits_to_difficulty(0x00000000), 0.0);
+    }
+
+    #[test]
+    fn test_nbits_to_difficulty_zero_mantissa() {
+        assert_eq!(nbits_to_difficulty(0x1d000000), 0.0);
+    }
+
+    #[test]
+    fn test_nbits_to_difficulty_higher_is_harder() {
+        // Lower nbits exponent = higher difficulty
+        let easy = nbits_to_difficulty(0x1d00ffff);
+        let hard = nbits_to_difficulty(0x1a00ffff);
+        assert!(hard > easy, "lower exponent should mean higher difficulty");
+    }
+
+    #[test]
+    fn test_nbits_to_difficulty_realistic_value() {
+        // nbits 0x170bef97 corresponds to roughly difficulty ~100T range
+        let diff = nbits_to_difficulty(0x170bef97);
+        assert!(diff > 1e12, "realistic mainnet difficulty should be > 1T, got {diff}");
+    }
+
 }

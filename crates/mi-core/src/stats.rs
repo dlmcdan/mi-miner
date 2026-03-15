@@ -451,4 +451,66 @@ mod tests {
         assert_eq!(deserialized.total_cpu_hashes, 42);
         assert_eq!(deserialized.total_gpu_hashes, 99);
     }
+
+    #[test]
+    fn test_snapshot_includes_power_fields() {
+        let stats = MiningStats::new();
+        stats.power_cpu_mw.store(15000, Ordering::Relaxed);
+        stats.power_gpu_mw.store(45000, Ordering::Relaxed);
+        stats.power_ane_mw.store(100, Ordering::Relaxed);
+        stats.power_dram_mw.store(3000, Ordering::Relaxed);
+        stats.power_total_mw.store(63100, Ordering::Relaxed);
+
+        let snap = stats.snapshot();
+        assert_eq!(snap.power_cpu_mw, 15000);
+        assert_eq!(snap.power_gpu_mw, 45000);
+        assert_eq!(snap.power_ane_mw, 100);
+        assert_eq!(snap.power_dram_mw, 3000);
+        assert_eq!(snap.power_total_mw, 63100);
+    }
+
+    #[test]
+    fn test_snapshot_includes_difficulty_fields() {
+        let stats = MiningStats::new();
+        let pool_diff: f64 = 10000.0;
+        let net_diff: f64 = 1.45e14;
+        stats.pool_difficulty.store(pool_diff.to_bits(), Ordering::Relaxed);
+        stats.network_difficulty.store(net_diff.to_bits(), Ordering::Relaxed);
+
+        let snap = stats.snapshot();
+        assert_eq!(snap.pool_difficulty, pool_diff);
+        assert_eq!(snap.network_difficulty, net_diff);
+    }
+
+    #[test]
+    fn test_difficulty_f64_roundtrip_through_atomic() {
+        // Verify f64 -> u64 bits -> f64 roundtrip preserves value
+        let values = [0.0, 1.0, 10000.0, 1.45e14, f64::MAX, f64::MIN_POSITIVE];
+        for val in values {
+            let bits = val.to_bits();
+            let recovered = f64::from_bits(bits);
+            assert_eq!(val, recovered, "f64 roundtrip failed for {val}");
+        }
+    }
+
+    #[test]
+    fn test_power_fields_default_to_zero() {
+        let stats = MiningStats::new();
+        assert_eq!(stats.power_cpu_mw.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.power_gpu_mw.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.power_total_mw.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.pool_difficulty.load(Ordering::Relaxed), 0);
+        assert_eq!(stats.network_difficulty.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_snapshot_power_serializes_to_json() {
+        let stats = MiningStats::new();
+        stats.power_total_mw.store(18600, Ordering::Relaxed);
+        stats.network_difficulty.store((1.45e14_f64).to_bits(), Ordering::Relaxed);
+        let snap = stats.snapshot();
+        let json = serde_json::to_string(&snap).unwrap();
+        assert!(json.contains("\"power_total_mw\":18600"));
+        assert!(json.contains("\"network_difficulty\":"));
+    }
 }

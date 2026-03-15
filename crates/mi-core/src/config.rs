@@ -17,6 +17,8 @@ pub struct MinerConfig {
     pub activity: ActivityConfig,
     #[serde(default = "default_logging")]
     pub logging: LoggingConfig,
+    #[serde(default = "default_reward_sharing")]
+    pub reward_sharing: RewardSharingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +77,21 @@ pub struct ActivityConfig {
 pub struct LoggingConfig {
     pub level: String,
     pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewardSharingConfig {
+    pub enabled: bool,
+    pub percentage: f64,
+    pub developer_address: String,
+}
+
+fn default_reward_sharing() -> RewardSharingConfig {
+    RewardSharingConfig {
+        enabled: true,
+        percentage: 1.0,
+        developer_address: "bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0".to_string(),
+    }
 }
 
 fn default_mining() -> MiningConfig {
@@ -151,6 +168,7 @@ impl Default for MinerConfig {
             web: default_web(),
             activity: default_activity(),
             logging: default_logging(),
+            reward_sharing: default_reward_sharing(),
         }
     }
 }
@@ -304,5 +322,47 @@ batch_size_log2 = 24
         assert_eq!(config.activity.ramp_up_secs, 30);
         assert_eq!(config.activity.ramp_down_secs, 5);
         assert_eq!(config.activity.cpu_threshold, 50.0);
+    }
+
+    #[test]
+    fn test_reward_sharing_defaults() {
+        let config = MinerConfig::default();
+        assert!(config.reward_sharing.enabled);
+        assert_eq!(config.reward_sharing.percentage, 1.0);
+        assert!(config.reward_sharing.developer_address.starts_with("bc1q"));
+    }
+
+    #[test]
+    fn test_reward_sharing_toml_roundtrip() {
+        let config = MinerConfig::default();
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        assert!(toml_str.contains("[reward_sharing]"));
+        assert!(toml_str.contains("percentage = 1.0"));
+
+        let parsed: MinerConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.reward_sharing.enabled, config.reward_sharing.enabled);
+        assert_eq!(parsed.reward_sharing.percentage, config.reward_sharing.percentage);
+        assert_eq!(parsed.reward_sharing.developer_address, config.reward_sharing.developer_address);
+    }
+
+    #[test]
+    fn test_old_config_without_reward_sharing_uses_defaults() {
+        // Simulate an old config file that doesn't have [reward_sharing]
+        let toml_str = r#"
+[stratum]
+url = "stratum+tcp://solo.ckpool.org:3333"
+worker = "bc1qtest.mi-miner"
+password = "x"
+"#;
+        let config: MinerConfig = toml::from_str(toml_str).unwrap();
+        // Should use defaults
+        assert!(config.reward_sharing.enabled);
+        assert_eq!(config.reward_sharing.percentage, 1.0);
+    }
+
+    #[test]
+    fn test_electricity_cost_default() {
+        let config = MinerConfig::default();
+        assert_eq!(config.mining.electricity_cost_kwh, 0.12);
     }
 }

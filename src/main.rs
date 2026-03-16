@@ -188,12 +188,17 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     let _ = std::fs::create_dir_all(mi_core::config::dirs_path());
     let _ = std::fs::write(&pid_path, std::process::id().to_string());
 
-    // Signal handler
+    // Signal handler — first Ctrl+C triggers graceful shutdown, second forces exit
     let stats_signal = stats.clone();
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
-        tracing::info!("Shutdown signal received");
+        tracing::info!("Shutdown signal received (Ctrl+C again to force quit)");
         stats_signal.should_stop.store(true, Ordering::Relaxed);
+
+        // Wait for a second Ctrl+C — if it comes, force exit immediately
+        tokio::signal::ctrl_c().await.ok();
+        tracing::warn!("Forced shutdown");
+        std::process::exit(1);
     });
 
     // GPU manager

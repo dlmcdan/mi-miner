@@ -234,7 +234,10 @@ impl StratumClient {
 
         // Response to our request
         if let Some(id) = response.id {
-            if let Some(ref error) = response.error {
+            if let Some(ref error_val) = response.error {
+                if !error_val.is_null() {
+                let error = super::messages::JsonRpcError::from_value(error_val)
+                    .unwrap_or(super::messages::JsonRpcError { code: 0, message: error_val.to_string() });
                 if id >= 3 {
                     // Share rejection
                     tracing::warn!(
@@ -248,6 +251,7 @@ impl StratumClient {
                     tracing::error!(id = id, msg = error.message, "Request failed");
                 }
                 return Ok(());
+                }
             }
 
             match id {

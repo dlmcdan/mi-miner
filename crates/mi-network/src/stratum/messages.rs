@@ -13,15 +13,35 @@ pub struct JsonRpcRequest {
 pub struct JsonRpcResponse {
     pub id: Option<u64>,
     pub result: Option<serde_json::Value>,
-    pub error: Option<JsonRpcError>,
+    pub error: Option<serde_json::Value>,
     pub method: Option<String>,
     pub params: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
+}
+
+impl JsonRpcError {
+    /// Parse an error from a serde_json::Value.
+    /// Handles both object {"code":N,"message":"..."} and array [N,"msg",""] formats.
+    pub fn from_value(v: &serde_json::Value) -> Option<Self> {
+        if let Some(obj) = v.as_object() {
+            Some(Self {
+                code: obj.get("code").and_then(|c| c.as_i64()).unwrap_or(0),
+                message: obj.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string(),
+            })
+        } else if let Some(arr) = v.as_array() {
+            Some(Self {
+                code: arr.first().and_then(|c| c.as_i64()).unwrap_or(0),
+                message: arr.get(1).and_then(|m| m.as_str()).unwrap_or("").to_string(),
+            })
+        } else {
+            None
+        }
+    }
 }
 
 /// Parsed mining.notify parameters
@@ -220,12 +240,30 @@ mod tests {
     }
 
     #[test]
-    fn test_json_rpc_response_with_error() {
+    fn test_json_rpc_response_with_error_object() {
         let json = r#"{"id":2,"result":null,"error":{"code":-1,"message":"bad"}}"#;
         let resp: JsonRpcResponse = serde_json::from_str(json).unwrap();
-        let err = resp.error.unwrap();
+        let err = JsonRpcError::from_value(&resp.error.unwrap()).unwrap();
         assert_eq!(err.code, -1);
         assert_eq!(err.message, "bad");
+    }
+
+    #[test]
+    fn test_json_rpc_response_with_error_array() {
+        // CKPool sends errors as arrays: [code, "message", "traceback"]
+        let json = r#"{"id":3,"result":null,"error":[22,"Duplicate share",""]}"#;
+        let resp: JsonRpcResponse = serde_json::from_str(json).unwrap();
+        let err = JsonRpcError::from_value(&resp.error.unwrap()).unwrap();
+        assert_eq!(err.code, 22);
+        assert_eq!(err.message, "Duplicate share");
+    }
+
+    #[test]
+    fn test_json_rpc_error_null_is_none() {
+        let json = r#"{"id":1,"result":true,"error":null}"#;
+        let resp: JsonRpcResponse = serde_json::from_str(json).unwrap();
+        // error is null — should be Some(Value::Null) but we check is_null()
+        assert!(resp.error.is_none() || resp.error.as_ref().unwrap().is_null());
     }
 
     #[test]

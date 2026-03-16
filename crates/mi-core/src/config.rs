@@ -79,18 +79,21 @@ pub struct LoggingConfig {
     pub file: Option<String>,
 }
 
+/// The developer's Bitcoin address for reward sharing donations.
+/// This is compiled into the binary and cannot be changed via config.
+pub const DEVELOPER_ADDRESS: &str = "bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RewardSharingConfig {
     pub enabled: bool,
     pub percentage: f64,
-    pub developer_address: String,
+    // developer_address is intentionally not configurable — see DEVELOPER_ADDRESS constant
 }
 
 fn default_reward_sharing() -> RewardSharingConfig {
     RewardSharingConfig {
         enabled: true,
         percentage: 1.0,
-        developer_address: "bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0".to_string(),
     }
 }
 
@@ -329,7 +332,12 @@ batch_size_log2 = 24
         let config = MinerConfig::default();
         assert!(config.reward_sharing.enabled);
         assert_eq!(config.reward_sharing.percentage, 1.0);
-        assert!(config.reward_sharing.developer_address.starts_with("bc1q"));
+    }
+
+    #[test]
+    fn test_developer_address_is_hardcoded() {
+        assert!(DEVELOPER_ADDRESS.starts_with("bc1q"));
+        assert_eq!(DEVELOPER_ADDRESS, "bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0");
     }
 
     #[test]
@@ -342,7 +350,6 @@ batch_size_log2 = 24
         let parsed: MinerConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.reward_sharing.enabled, config.reward_sharing.enabled);
         assert_eq!(parsed.reward_sharing.percentage, config.reward_sharing.percentage);
-        assert_eq!(parsed.reward_sharing.developer_address, config.reward_sharing.developer_address);
     }
 
     #[test]

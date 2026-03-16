@@ -1336,7 +1336,7 @@ function gatherConfig() {
     electricity_cost_kwh: parseFloat(document.getElementById('cfg-elec-cost').value)||0.12,
     reward_sharing_enabled: document.getElementById('cfg-reward-enabled').checked,
     reward_sharing_pct: parseFloat(document.getElementById('cfg-reward-pct').value)||1.0,
-    reward_sharing_address: document.getElementById('cfg-reward-address-val').value || 'bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0'
+    reward_sharing_address: document.getElementById('cfg-reward-address').textContent
   };
 }
 

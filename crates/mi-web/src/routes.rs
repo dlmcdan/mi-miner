@@ -282,7 +282,7 @@ pub struct ConfigData {
     pub electricity_cost_kwh: f64,
     pub reward_sharing_enabled: bool,
     pub reward_sharing_pct: f64,
-    pub reward_sharing_address: String,
+    pub reward_sharing_address: String, // always set to DEVELOPER_ADDRESS; ignored on save
 }
 
 impl From<&MinerConfig> for ConfigData {
@@ -310,7 +310,7 @@ impl From<&MinerConfig> for ConfigData {
             electricity_cost_kwh: c.mining.electricity_cost_kwh,
             reward_sharing_enabled: c.reward_sharing.enabled,
             reward_sharing_pct: c.reward_sharing.percentage,
-            reward_sharing_address: c.reward_sharing.developer_address.clone(),
+            reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         }
     }
 }
@@ -339,7 +339,7 @@ impl ConfigData {
         c.mining.electricity_cost_kwh = self.electricity_cost_kwh;
         c.reward_sharing.enabled = self.reward_sharing_enabled;
         c.reward_sharing.percentage = self.reward_sharing_pct;
-        c.reward_sharing.developer_address = self.reward_sharing_address.clone();
+        // developer_address is hardcoded — intentionally not settable via API
     }
 }
 
@@ -749,7 +749,7 @@ mod tests {
             activity_ramp_down_secs: 3,
             activity_cpu_threshold: 75.0,
             log_level: "debug".to_string(),
-            electricity_cost_kwh: 0.15, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: "bc1qtest".to_string(),
+            electricity_cost_kwh: 0.15, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         };
         data.apply_to(&mut config);
 
@@ -812,7 +812,7 @@ mod tests {
             "electricity_cost_kwh": 0.12,
             "reward_sharing_enabled": true,
             "reward_sharing_pct": 1.0,
-            "reward_sharing_address": "bc1qtest"
+            "reward_sharing_address": "bc1qt8le6z4p0t5q4qtzsmxhwt7cxmu3ycyzpx77h0"
         }"#;
         let data: ConfigData = serde_json::from_str(json).unwrap();
         assert_eq!(data.mining_threads, 8);
@@ -965,7 +965,7 @@ mod tests {
             activity_ramp_down_secs: 5,
             activity_cpu_threshold: 50.0,
             log_level: "info".to_string(),
-            electricity_cost_kwh: 0.12, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: "bc1qtest".to_string(),
+            electricity_cost_kwh: 0.12, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         };
         let hw = mi_core::hardware::detect();
         let resp = AutoConfigResponse {
@@ -1142,7 +1142,7 @@ mod tests {
             activity_ramp_down_secs: 0,
             activity_cpu_threshold: 0.0,
             log_level: "".to_string(),
-            electricity_cost_kwh: 0.0, reward_sharing_enabled: false, reward_sharing_pct: 0.0, reward_sharing_address: "".to_string(),
+            electricity_cost_kwh: 0.0, reward_sharing_enabled: false, reward_sharing_pct: 0.0, reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         };
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"mining_threads\":0"));
@@ -1176,7 +1176,7 @@ mod tests {
             activity_ramp_down_secs: u64::MAX,
             activity_cpu_threshold: 100.0,
             log_level: "trace".to_string(),
-            electricity_cost_kwh: 0.50, reward_sharing_enabled: true, reward_sharing_pct: 2.0, reward_sharing_address: "bc1qtest".to_string(),
+            electricity_cost_kwh: 0.50, reward_sharing_enabled: true, reward_sharing_pct: 2.0, reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         };
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"gpu_intensity\":1.0") || json.contains("\"gpu_intensity\":1"));
@@ -1211,7 +1211,7 @@ mod tests {
             activity_ramp_down_secs: 0,
             activity_cpu_threshold: 0.0,
             log_level: "".to_string(),
-            electricity_cost_kwh: 0.0, reward_sharing_enabled: false, reward_sharing_pct: 0.0, reward_sharing_address: "".to_string(),
+            electricity_cost_kwh: 0.0, reward_sharing_enabled: false, reward_sharing_pct: 0.0, reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         };
 
         let mut config = MinerConfig::default();
@@ -1245,7 +1245,7 @@ mod tests {
             activity_ramp_down_secs: 3,
             activity_cpu_threshold: 60.0,
             log_level: "warn".to_string(),
-            electricity_cost_kwh: 0.18, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: "bc1qtest".to_string(),
+            electricity_cost_kwh: 0.18, reward_sharing_enabled: true, reward_sharing_pct: 1.0, reward_sharing_address: mi_core::config::DEVELOPER_ADDRESS.to_string(),
         };
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: ConfigData = serde_json::from_str(&json).unwrap();
@@ -1349,7 +1349,8 @@ mod tests {
         let data = ConfigData::from(&config);
         assert!(data.reward_sharing_enabled);
         assert_eq!(data.reward_sharing_pct, 1.0);
-        assert!(data.reward_sharing_address.starts_with("bc1q"));
+        // Address is always the hardcoded developer address
+        assert_eq!(data.reward_sharing_address, mi_core::config::DEVELOPER_ADDRESS);
     }
 
     #[test]

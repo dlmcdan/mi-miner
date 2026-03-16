@@ -123,7 +123,11 @@ kernel void sha256d_mine(
     w[0] = input[8];   // bytes 64-67 (timestamp portion that falls in second block)
     w[1] = input[9];   // bytes 68-71 (bits)
     w[2] = input[10];  // bytes 72-75
-    w[3] = nonce;      // bytes 76-79 (nonce, little-endian as-is since midstate expects it)
+    // Nonce must be byte-swapped: CPU stores nonce as LE bytes in the header,
+    // but SHA-256 reads message words as big-endian. So nonce 0x12345678 stored
+    // as LE bytes [0x78,0x56,0x34,0x12] becomes BE word 0x78563412 in SHA-256.
+    w[3] = ((nonce & 0xFF) << 24) | ((nonce & 0xFF00) << 8) |
+           ((nonce >> 8) & 0xFF00) | ((nonce >> 24) & 0xFF);
 
     // Padding: 0x80 followed by zeros, then 64-bit big-endian bit count
     w[4] = 0x80000000; // padding start

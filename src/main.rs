@@ -345,8 +345,10 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                     // Parse midstate from header bytes 0-31 (first 8 u32 big-endian)
                     // Actually the GPU needs the SHA-256 midstate, not raw header bytes.
                     // For now, pass the header tail words and let the GPU do full hashing.
+                    // Tail words must be big-endian u32 to match SHA-256's message schedule.
+                    // SHA-256 reads bytes as BE words: w[i] = u32::from_be_bytes(block[i*4..])
                     for i in 0..4 {
-                        tail[i] = u32::from_le_bytes([
+                        tail[i] = u32::from_be_bytes([
                             header[64 + i * 4],
                             header[64 + i * 4 + 1],
                             header[64 + i * 4 + 2],

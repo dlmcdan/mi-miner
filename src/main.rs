@@ -214,10 +214,15 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
     // Channel for share submission to stratum
     let (submit_tx, submit_rx) = tokio::sync::mpsc::channel(64);
 
+    // Separate SharedWork for CPU and GPU — each gets a different extranonce2,
+    // producing different headers so they search independent hash spaces.
+    let cpu_shared_work = mi_mining::worker::SharedWork::new();
+    let gpu_shared_work = mi_mining::worker::SharedWork::new();
+
     // CPU mining pool — workers hash continuously, polling SharedWork for new jobs
     let submit_tx_mining = submit_tx.clone();
     let mining_pool = if !config.mining.gpu_only {
-        let pool = mi_mining::MiningPool::new(
+        let pool = mi_mining::MiningPool::with_shared_work(
             config.mining.threads,
             stats.clone(),
             Box::new(move |work, nonce, _hash| {
@@ -230,43 +235,51 @@ async fn run(config: MinerConfig, needs_wallet: bool) {
                 };
                 let _ = submit_tx_mining.try_send(submission);
             }),
+            cpu_shared_work.clone(),
         );
         Some(pool)
     } else {
         None
     };
 
-    // Shared work visible to both CPU workers and GPU thread
-    let global_shared_work = if let Some(ref pool) = mining_pool {
-        pool.shared_work()
-    } else {
-        mi_mining::worker::SharedWork::new()
-    };
-
-    // Work distribution: stratum callback updates SharedWork
+    // Work distribution: stratum callback builds separate headers for CPU and GPU
+    // CPU gets extranonce2=0, GPU gets extranonce2=1 — different coinbase → different
+    // merkle root → different header bytes → completely independent hash spaces.
     let on_work: Arc<mi_network::stratum::client::WorkCallback> = {
-        let shared_work = global_shared_work.clone();
+        let cpu_work = cpu_shared_work.clone();
+        let gpu_work = gpu_shared_work.clone();
         Arc::new(Box::new(
             move |template: mi_mining::block::BlockTemplate, target: [u8; 32]| {
-                let (_header, header_bytes) = template.build_header(0);
+                let ntime = format!("{:08x}", template.timestamp);
 
-                let work = mi_mining::worker::Work {
-                    header: header_bytes,
+                // CPU work: extranonce2 = 0
+                let (_hdr_cpu, header_cpu) = template.build_header(0);
+                cpu_work.update(mi_mining::worker::Work {
+                    header: header_cpu,
                     target,
                     job_id: template.job_id.clone(),
                     extranonce: 0,
-                    ntime: format!("{:08x}", template.timestamp),
-                };
+                    ntime: ntime.clone(),
+                });
 
-                tracing::info!(job = template.job_id, "New work → miners");
-                shared_work.update(work);
+                // GPU work: extranonce2 = 1 (different merkle root → independent hash space)
+                let (_hdr_gpu, header_gpu) = template.build_header(1);
+                gpu_work.update(mi_mining::worker::Work {
+                    header: header_gpu,
+                    target,
+                    job_id: template.job_id.clone(),
+                    extranonce: 1,
+                    ntime,
+                });
+
+                tracing::info!(job = template.job_id, "New work → CPU (en2=0) + GPU (en2=1)");
             },
         ))
     };
 
-    // GPU mining thread — reads SharedWork and dispatches Metal compute batches
+    // GPU mining thread — reads its own SharedWork and dispatches Metal compute batches
     if gpu_available {
-        let shared_work = global_shared_work.clone();
+        let shared_work = gpu_shared_work.clone();
         let stats_gpu = stats.clone();
         let submit_tx_gpu = submit_tx.clone();
         let batch_size_log2 = config.gpu.batch_size_log2;

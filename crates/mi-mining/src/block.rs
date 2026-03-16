@@ -164,4 +164,72 @@ mod tests {
         let (header, _) = template.build_header(0);
         assert_eq!(header.nonce, 0);
     }
+
+    #[test]
+    fn test_extranonce_produces_completely_different_headers() {
+        let template = BlockTemplate {
+            job_id: "en-test".to_string(),
+            version: 0x20000000,
+            prev_hash: [0xAA; 32],
+            coinbase_1: vec![0x01, 0x02, 0x03, 0x04],
+            coinbase_2: vec![0x05, 0x06, 0x07, 0x08],
+            merkle_branches: vec![],
+            bits: 0x1d00ffff,
+            timestamp: 1700000000,
+            clean_jobs: true,
+            extranonce_size: 4,
+        };
+
+        let (_h0, bytes0) = template.build_header(0);
+        let (_h1, bytes1) = template.build_header(1);
+
+        // Bytes 0-35 (version + prev_hash) should be identical
+        assert_eq!(&bytes0[0..36], &bytes1[0..36]);
+
+        // Bytes 36-67 (merkle root) MUST differ — this is the key separation
+        assert_ne!(&bytes0[36..68], &bytes1[36..68]);
+
+        // Bytes 68-79 (timestamp + bits + nonce) should be identical
+        assert_eq!(&bytes0[68..80], &bytes1[68..80]);
+
+        // Same job metadata
+        assert_eq!(_h0.version, _h1.version);
+        assert_eq!(_h0.prev_hash, _h1.prev_hash);
+        assert_eq!(_h0.timestamp, _h1.timestamp);
+        assert_eq!(_h0.bits, _h1.bits);
+    }
+
+    #[test]
+    fn test_extranonce_hashes_are_independent() {
+        // Verify that hashing the same nonce on headers with different extranonce
+        // produces different SHA-256d results (independent hash spaces)
+        use mi_core::bitcoin_util::sha256d;
+
+        let template = BlockTemplate {
+            job_id: "hash-test".to_string(),
+            version: 0x20000000,
+            prev_hash: [0; 32],
+            coinbase_1: vec![0x01],
+            coinbase_2: vec![0x02],
+            merkle_branches: vec![],
+            bits: 0x1d00ffff,
+            timestamp: 1700000000,
+            clean_jobs: false,
+            extranonce_size: 4,
+        };
+
+        let (_, mut header0) = template.build_header(0);
+        let (_, mut header1) = template.build_header(1);
+
+        // Set the same nonce on both
+        let nonce: u32 = 42;
+        header0[76..80].copy_from_slice(&nonce.to_le_bytes());
+        header1[76..80].copy_from_slice(&nonce.to_le_bytes());
+
+        let hash0 = sha256d(&header0);
+        let hash1 = sha256d(&header1);
+
+        // Different extranonce → different merkle root → different hash
+        assert_ne!(hash0, hash1, "Same nonce on different extranonces must produce different hashes");
+    }
 }

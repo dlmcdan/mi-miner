@@ -806,6 +806,76 @@ mod tests {
     }
 
     #[test]
+    fn test_submission_roundtrip_with_extranonce2_nonzero() {
+        // Verify that GPU work (extranonce2=1) also roundtrips correctly.
+        // This ensures the CPU/GPU separation via different extranonce2 values
+        // produces shares that the pool can validate.
+        use mi_core::bitcoin_util::sha256d;
+
+        let mut session = StratumSession::new("w".to_string());
+        session.set_extranonce("aabbccdd", 4);
+
+        let notify = super::super::messages::MiningNotify {
+            job_id: "gpu_roundtrip".to_string(),
+            prev_hash: "0".repeat(64),
+            coinbase_1: "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704".to_string(),
+            coinbase_2: "0101000000000000001976a914000000000000000000000000000000000000000088ac00000000".to_string(),
+            merkle_branches: vec![],
+            version: "20000000".to_string(),
+            nbits: "1d00ffff".to_string(),
+            ntime: "65a5e300".to_string(),
+            clean_jobs: true,
+        };
+
+        let template = session.process_notify(notify).unwrap();
+
+        // GPU side: build header with extranonce2=1
+        let extranonce2: u64 = 1;
+        let test_nonce: u32 = 0x42424242;
+        let (_header, mut header_bytes) = template.build_header(extranonce2);
+        header_bytes[76..80].copy_from_slice(&test_nonce.to_le_bytes());
+        let miner_hash = sha256d(&header_bytes);
+
+        // Format submission with extranonce2=1
+        let extranonce2_hex = hex::encode(&extranonce2.to_le_bytes()[..session.extranonce2_size]);
+        let nonce_hex = hex::encode(test_nonce.to_le_bytes());
+
+        // Verify extranonce2_hex is different from zero
+        assert_eq!(extranonce2_hex, "01000000");
+        assert_ne!(extranonce2_hex, "00000000");
+
+        // Pool side: reconstruct header using submitted extranonce2=1
+        let cb1 = hex::decode("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704").unwrap();
+        let cb2 = hex::decode("0101000000000000001976a914000000000000000000000000000000000000000088ac00000000").unwrap();
+        let en2_bytes = hex::decode(&extranonce2_hex).unwrap();
+
+        let mut coinbase = Vec::new();
+        coinbase.extend_from_slice(&cb1);
+        coinbase.extend_from_slice(&session.extranonce1);
+        coinbase.extend_from_slice(&en2_bytes);
+        coinbase.extend_from_slice(&cb2);
+
+        let coinbase_hash = sha256d(&coinbase);
+        let merkle_root = coinbase_hash;
+
+        let mut pool_header = [0u8; 80];
+        pool_header[0..4].copy_from_slice(&0x20000000i32.to_le_bytes());
+        // prev_hash is all zeros (with 4-byte group reversal = still zeros)
+        pool_header[36..68].copy_from_slice(&merkle_root);
+        pool_header[68..72].copy_from_slice(&0x65a5e300u32.to_le_bytes());
+        pool_header[72..76].copy_from_slice(&0x1d00ffffu32.to_le_bytes());
+        pool_header[76..80].copy_from_slice(&hex::decode(&nonce_hex).unwrap());
+
+        let pool_hash = sha256d(&pool_header);
+        assert_eq!(miner_hash, pool_hash, "GPU extranonce2=1 roundtrip must match");
+
+        // Also verify that extranonce2=0 and extranonce2=1 produce DIFFERENT headers
+        let (_, header0) = template.build_header(0);
+        assert_ne!(&header_bytes[36..68], &header0[36..68],
+            "extranonce2=0 and extranonce2=1 must have different merkle roots");
+    }
+
+    #[test]
     fn test_handle_response_share_result_false_no_accept() {
         let stats = MiningStats::new();
         let client = StratumClient::new("url", "w", "p", stats.clone());

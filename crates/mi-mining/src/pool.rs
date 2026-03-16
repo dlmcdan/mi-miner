@@ -18,7 +18,18 @@ impl MiningPool {
         stats: Arc<MiningStats>,
         on_found: FoundCallback,
     ) -> Self {
-        let shared_work = SharedWork::new();
+        Self::with_shared_work(thread_count, stats, on_found, SharedWork::new())
+    }
+
+    /// Create a mining pool that uses an externally-provided SharedWork.
+    /// This allows the caller to control work distribution (e.g., separate CPU/GPU work).
+    pub fn with_shared_work(
+        thread_count: usize,
+        stats: Arc<MiningStats>,
+        on_found: FoundCallback,
+        shared_work: Arc<SharedWork>,
+    ) -> Self {
+        let shared_work = shared_work;
         let on_found = Arc::new(on_found);
 
         let mut workers = Vec::with_capacity(thread_count);
@@ -137,6 +148,49 @@ mod tests {
         // After pool creation, active_cpu_threads should match thread_count
         assert_eq!(stats_clone.active_cpu_threads.load(Ordering::Relaxed), 1);
         assert_eq!(stats_clone.cpu_threads.load(Ordering::Relaxed), 1);
+
+        pool.shutdown();
+    }
+
+    #[test]
+    fn with_shared_work_uses_external_shared_work() {
+        let stats = MiningStats::new();
+        let external_sw = SharedWork::new();
+
+        // Pre-populate the external shared work
+        let work = Work {
+            header: [0xABu8; 80],
+            target: [0xFFu8; 32],
+            job_id: "external-work".to_string(),
+            extranonce: 42,
+            ntime: "aabb".to_string(),
+        };
+        external_sw.update(work);
+        assert_eq!(external_sw.generation.load(Ordering::Acquire), 1);
+
+        let pool = MiningPool::with_shared_work(1, stats, noop_callback(), external_sw.clone());
+
+        // Pool's shared_work should be the same Arc
+        let pool_sw = pool.shared_work();
+        assert_eq!(pool_sw.generation.load(Ordering::Acquire), 1);
+        let stored = pool_sw.work.lock().unwrap();
+        assert_eq!(stored.as_ref().unwrap().job_id, "external-work");
+        assert_eq!(stored.as_ref().unwrap().extranonce, 42);
+        drop(stored);
+
+        // Updating external_sw should be visible through pool_sw
+        let work2 = Work {
+            header: [0u8; 80],
+            target: [0u8; 32],
+            job_id: "updated".to_string(),
+            extranonce: 99,
+            ntime: "ccdd".to_string(),
+        };
+        external_sw.update(work2);
+        assert_eq!(pool_sw.generation.load(Ordering::Acquire), 2);
+        let stored2 = pool_sw.work.lock().unwrap();
+        assert_eq!(stored2.as_ref().unwrap().job_id, "updated");
+        drop(stored2);
 
         pool.shutdown();
     }

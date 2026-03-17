@@ -208,6 +208,11 @@ impl StratumClient {
                         );
 
                         let target = session.share_target();
+                        tracing::debug!(
+                            difficulty = session.current_difficulty,
+                            target_hex = hex::encode(&target[0..8]),
+                            "Share target"
+                        );
                         on_work(template, target);
                     }
                 }

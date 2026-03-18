@@ -134,7 +134,10 @@ impl StratumClient {
 
                 Some(submission) = submit_rx.recv() => {
                     let extranonce2_hex = hex::encode(&submission.extranonce2.to_le_bytes()[..session.extranonce2_size]);
-                    let nonce_hex = hex::encode(submission.nonce.to_le_bytes());
+                    // Nonce is submitted as big-endian hex of the integer value.
+                    // Pools do parseInt(hex, 16) to recover the integer, then serialize
+                    // it as LE in the block header. This is standard stratum convention.
+                    let nonce_hex = format!("{:08x}", submission.nonce);
 
                     let req = build_submit(
                         request_id,
@@ -683,14 +686,58 @@ mod tests {
 
     #[test]
     fn test_nonce_hex_encoding_byte_order() {
-        // Nonce must be encoded as little-endian hex for stratum submission.
-        // The pool does unhexlify(nonce_hex) and places the bytes directly into
-        // the header at offset 76-79. The miner hashes with nonce in LE, so the
-        // hex must also be LE.
-        assert_eq!(hex::encode(0xDEADBEEFu32.to_le_bytes()), "efbeadde");
-        assert_eq!(hex::encode(42u32.to_le_bytes()), "2a000000");
-        assert_eq!(hex::encode(0u32.to_le_bytes()), "00000000");
-        assert_eq!(hex::encode(u32::MAX.to_le_bytes()), "ffffffff");
+        // Nonce is submitted as big-endian hex of the integer value.
+        // Pools do parseInt(hex, 16) to recover the integer, then serialize
+        // it as LE in the block header. This is standard stratum convention.
+        assert_eq!(format!("{:08x}", 0xDEADBEEFu32), "deadbeef");
+        assert_eq!(format!("{:08x}", 42u32), "0000002a");
+        assert_eq!(format!("{:08x}", 0u32), "00000000");
+        assert_eq!(format!("{:08x}", u32::MAX), "ffffffff");
+    }
+
+    #[test]
+    fn test_nonce_hex_roundtrips_through_parseint() {
+        // The critical invariant: the pool does parseInt(nonce_hex, 16) to get the
+        // integer, then writes it as LE bytes in the header. This must produce the
+        // same bytes as what the miner used when hashing.
+        for nonce in [0u32, 1, 42, 0xDEADBEEF, u32::MAX, 0x12345678] {
+            let nonce_hex = format!("{:08x}", nonce);
+
+            // Pool side: parseInt → LE bytes
+            let pool_nonce = u32::from_str_radix(&nonce_hex, 16).unwrap();
+            let pool_bytes = pool_nonce.to_le_bytes();
+
+            // Miner side: nonce stored as LE bytes in header
+            let miner_bytes = nonce.to_le_bytes();
+
+            assert_eq!(
+                pool_bytes, miner_bytes,
+                "Nonce {nonce} (hex {nonce_hex}): pool bytes {:?} != miner bytes {:?}",
+                pool_bytes, miner_bytes
+            );
+        }
+    }
+
+    #[test]
+    fn test_nonce_hex_is_not_le_bytes() {
+        // Guard against the previous bug where nonce was encoded as LE hex bytes.
+        // For asymmetric nonces, LE hex != BE hex, so the pool would reconstruct
+        // a different nonce and reject the share.
+        let nonce: u32 = 0xDEADBEEF;
+        let correct_hex = format!("{:08x}", nonce);     // "deadbeef" (BE)
+        let wrong_hex = hex::encode(nonce.to_le_bytes()); // "efbeadde" (LE)
+
+        assert_eq!(correct_hex, "deadbeef");
+        assert_eq!(wrong_hex, "efbeadde");
+        assert_ne!(correct_hex, wrong_hex, "BE and LE hex must differ for asymmetric nonces");
+
+        // Verify correct encoding roundtrips through parseInt
+        let pool_nonce = u32::from_str_radix(&correct_hex, 16).unwrap();
+        assert_eq!(pool_nonce, nonce);
+
+        // Verify wrong encoding does NOT roundtrip
+        let wrong_nonce = u32::from_str_radix(&wrong_hex, 16).unwrap();
+        assert_ne!(wrong_nonce, nonce, "LE hex encoding would give pool the wrong nonce");
     }
 
     #[test]
@@ -752,7 +799,7 @@ mod tests {
 
         // Format submission the same way the real code does
         let extranonce2_hex = hex::encode(&extranonce2.to_le_bytes()[..session.extranonce2_size]);
-        let nonce_hex = hex::encode(test_nonce.to_le_bytes());
+        let nonce_hex = format!("{:08x}", test_nonce);
 
         // Pool side: reconstruct the header from the submitted hex values
         // 1. Rebuild coinbase with extranonce1 + extranonce2
@@ -791,9 +838,9 @@ mod tests {
         pool_header[36..68].copy_from_slice(&merkle_root);
         pool_header[68..72].copy_from_slice(&timestamp.to_le_bytes());
         pool_header[72..76].copy_from_slice(&bits.to_le_bytes());
-        // Pool places nonce bytes directly from unhexlify(nonce_hex)
-        let nonce_bytes = hex::decode(&nonce_hex).unwrap();
-        pool_header[76..80].copy_from_slice(&nonce_bytes);
+        // Pool does parseInt(nonce_hex, 16) to get the integer, then writes LE
+        let pool_nonce = u32::from_str_radix(&nonce_hex, 16).unwrap();
+        pool_header[76..80].copy_from_slice(&pool_nonce.to_le_bytes());
 
         // 4. Hash and compare
         let pool_hash = sha256d(&pool_header);
@@ -843,7 +890,7 @@ mod tests {
 
         // Format submission with extranonce2=1
         let extranonce2_hex = hex::encode(&extranonce2.to_le_bytes()[..session.extranonce2_size]);
-        let nonce_hex = hex::encode(test_nonce.to_le_bytes());
+        let nonce_hex = format!("{:08x}", test_nonce);
 
         // Verify extranonce2_hex is different from zero
         assert_eq!(extranonce2_hex, "01000000");
@@ -869,7 +916,9 @@ mod tests {
         pool_header[36..68].copy_from_slice(&merkle_root);
         pool_header[68..72].copy_from_slice(&0x65a5e300u32.to_le_bytes());
         pool_header[72..76].copy_from_slice(&0x1d00ffffu32.to_le_bytes());
-        pool_header[76..80].copy_from_slice(&hex::decode(&nonce_hex).unwrap());
+        // Pool does parseInt(nonce_hex, 16) → integer → LE bytes in header
+        let pool_nonce_gpu = u32::from_str_radix(&nonce_hex, 16).unwrap();
+        pool_header[76..80].copy_from_slice(&pool_nonce_gpu.to_le_bytes());
 
         let pool_hash = sha256d(&pool_header);
         assert_eq!(miner_hash, pool_hash, "GPU extranonce2=1 roundtrip must match");
